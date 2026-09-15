@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model PriceSnapshot {
+  id              Int      @id @default(autoincrement())
+  ticker          String
+  issuer          String
+  chain           String
+  tokenSymbol     String
+  contractAddress String?
+  dexPrice        Float
+  oraclePrice     Float?
+  premiumPct      Float?
+  liquidityUsd    Float?
+  source          String
+  capturedAt      DateTime @default(now())
+
+  @@index([ticker])
+  @@index([ticker, capturedAt])
+  @@index([ticker, chain, issuer])
+  @@index([ticker, chain, issuer, capturedAt])
+  @@index([issuer, capturedAt])
+  @@index([capturedAt])
+}
+
+model ArbitrageOpportunity {
+  id              Int      @id @default(autoincrement())
+  ticker          String
+  type            String   @default("B")
+  buyChain        String
+  buyIssuer       String
+  buyPrice        Float
+  sellChain       String
+  sellIssuer      String
+  sellPrice       Float
+  spreadPct       Float
+  estimatedProfit Float?
+  detectedAt      DateTime @default(now())
+  isActive        Boolean  @default(true)
+
+  @@index([ticker])
+  @@index([isActive])
+}
+
+model DailyStat {
+  id             Int      @id @default(autoincrement())
+  ticker         String
+  chain          String
+  issuer         String
+  date           DateTime
+  avgPrice       Float
+  avgPremiumPct  Float?
+  maxPremiumPct  Float?
+  minPremiumPct  Float?
+  avgLiquidity   Float?
+  snapshotCount  Int
+
+  @@unique([ticker, chain, issuer, date])
+  @@index([ticker])
+}

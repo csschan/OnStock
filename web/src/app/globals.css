@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-primary: #2563EB;
+  --color-primary-hover: #1D4ED8;
+  --color-green: #16A34A;
+  --color-red: #DC2626;
+  --color-bg: #FFFFFF;
+  --color-bg-secondary: #F8FAFC;
+  --color-border: #E2E8F0;
+  --color-text: #0F172A;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 价格数字用等宽字体 */
+.font-price {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
