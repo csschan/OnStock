@@ -83,6 +83,17 @@ export const ISSUERS: Record<string, IssuerInfo> = {
     tradingMethod: 'CEX 订单簿交易',
     tradingDesc: '在币安交易所用 USDT 直接买卖，流动性最好，需要币安 KYC 账号',
   },
+  prestocks: {
+    name: 'PreStocks',
+    slug: 'prestocks',
+    redemption: false,
+    kyc: 'none',
+    backing: 'Economic exposure to pre-IPO companies, tokenized on Solana',
+    website: 'https://prestocks.com',
+    tradingModel: 'dex',
+    tradingMethod: 'DEX Swap (USDC → token)',
+    tradingDesc: 'Buy pre-IPO exposure on Solana via Jupiter swap. No KYC required.',
+  },
 }
 
 /**
@@ -133,6 +144,9 @@ export function getTradeUrl(
 
     case 'hyperliquid':
       return `https://app.hyperliquid.xyz/trade/${ticker}`
+
+    case 'prestocks':
+      return `https://jup.ag/swap/USDC-${contractAddress}`
 
     default:
       return null

@@ -330,7 +330,7 @@ export interface AssetDetail {
   ticker: string
   name: string
   sector: string
-  type: 'stock' | 'etf'
+  type: 'stock' | 'etf' | 'pre-ipo'
   marketPrice: number | null
   change24h: number | null
   instruments: InstrumentData[]
@@ -342,7 +342,7 @@ export interface AssetSummary {
   ticker: string
   name: string
   sector: string
-  type: 'stock' | 'etf'
+  type: 'stock' | 'etf' | 'pre-ipo'
   marketPrice: number | null
   change24h: number | null
   instrumentCount: number
@@ -355,7 +355,7 @@ export interface AssetSearchResult {
   ticker: string
   name: string
   sector: string
-  type: 'stock' | 'etf'
+  type: 'stock' | 'etf' | 'pre-ipo'
   marketPrice: number | null
   tradeableCount: number
 }

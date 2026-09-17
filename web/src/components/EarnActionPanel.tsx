@@ -62,7 +62,7 @@ function TxStatusDisplay({ status, txHash, error, onClose }: {
 
       {txHash && (
         <a
-          href={`https://solscan.io/tx/${txHash}`}
+          href={`https://solscan.io/tx/${txHash}?cluster=devnet`}
           target="_blank"
           rel="noopener noreferrer"
           style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 4 }}

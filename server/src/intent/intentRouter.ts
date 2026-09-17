@@ -71,6 +71,13 @@ export interface IntentRouterResult {
   generatedAt: string
 }
 
+// ─── Pre-IPO tickers (no mainnet vault, no Kamino, swap-only) ───────────────
+
+const PRE_IPO_TICKERS = new Set([
+  'ANTHROPIC', 'OPENAI', 'SPACEX', 'ANDURIL', 'NEURALINK',
+  'FIGUREAI', 'XAI', 'POLYMARKET', 'KALSHI',
+])
+
 // ─── Ticker → xStock symbol mapping ────────────────────────────────────────
 
 const TICKER_TO_XSTOCK: Record<string, string> = {
@@ -84,6 +91,29 @@ const TICKER_TO_XSTOCK: Record<string, string> = {
   COIN:  'COINx',
   MSTR:  'MSTRx',
   CRCL:  'CRCLx',
+  // PreStocks — pre-IPO tokens on Solana
+  ANTHROPIC:  'ANTHROPIC',
+  OPENAI:     'OPENAI',
+  SPACEX:     'SPACEX',
+  ANDURIL:    'ANDURIL',
+  NEURALINK:  'NEURALINK',
+  FIGUREAI:   'FIGUREAI',
+  XAI:        'XAI',
+  POLYMARKET: 'POLYMARKET',
+  KALSHI:     'KALSHI',
+}
+
+// Solana mint address for Jupiter swap URL (PreStocks use mint address, xStocks use symbol)
+const TICKER_TO_SOLANA_MINT: Record<string, string> = {
+  ANTHROPIC:  'Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw',
+  OPENAI:     'PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF',
+  SPACEX:     'PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh',
+  ANDURIL:    'PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB',
+  NEURALINK:  'PrekqLJvJ3qVdXmBGDiexvwUTF4rLFDa6HWS4HJbw9S',
+  FIGUREAI:   'PreZad18qfPtbxNpMtMuAuX2zVpvkEU8DnJx56faCWd',
+  XAI:        'PreC1KtJ1sBPPqaeeqL6Qb15GTLCYVvyYEwxhdfTwfx',
+  POLYMARKET: 'Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP',
+  KALSHI:     'PreLWGkkeqG1s4HEfFZSy9moCrJ7btsHuUtfcCeoRua',
 }
 
 const SHIFT_TOKENS: Record<string, { long2x: string; short1x: string }> = {
@@ -137,17 +167,179 @@ async function readMarketSignals(ticker: string): Promise<{
 async function readApySignals(xstockSymbol: string): Promise<{
   vaultApy: number
   kaminoApy: number
+  vaultTvl: number
+  kaminoTvl: number
 }> {
   const yields = await fetchAllDefiYields()
-  const vaultYield = yields.find(y => y.protocol === 'onstock' && y.asset === xstockSymbol)
-  const kaminoYield = yields.find(y => y.protocol === 'kamino' && y.asset === xstockSymbol)
+  const vaultYield  = yields.find(y => y.protocol === 'onstock' && y.asset === xstockSymbol)
+  const kaminoYield = yields.find(y => y.protocol === 'kamino'  && y.asset === xstockSymbol)
   return {
-    vaultApy: vaultYield?.netApy ?? 4.2,
-    kaminoApy: kaminoYield?.supplyApy ?? 0,
+    vaultApy:   vaultYield?.netApy     ?? 4.2,
+    kaminoApy:  kaminoYield?.supplyApy ?? 0,
+    vaultTvl:   vaultYield?.tvlUsd     ?? 0,
+    kaminoTvl:  kaminoYield?.tvlUsd    ?? 0,
   }
 }
 
+// ─── Pre-IPO route generation (buy/hold only, no vault/Kamino/leverage) ─────
+
+function buildPreIpoRoutes(
+  ticker: string,
+  amountUsd: number,
+  riskTolerance: 'low' | 'medium' | 'high',
+  premiumPct: number,
+  momentum24h: number,
+  oraclePrice: number | null,
+): RecommendedRoute[] {
+  const routes: RecommendedRoute[] = []
+  const mintAddress = TICKER_TO_SOLANA_MINT[ticker] ?? ticker
+  const isDiscount = premiumPct < -0.5
+  const isBullish = momentum24h > 1.0
+  const isBearish = momentum24h < -2.0
+  const isExpensive = premiumPct > 1.5
+  const priceStr = oraclePrice ? `$${oraclePrice.toFixed(2)}` : 'unknown'
+  const premiumLabel = premiumPct > 0
+    ? `premium +${premiumPct.toFixed(2)}%`
+    : `discount ${premiumPct.toFixed(2)}%`
+
+  // Route 1: Direct buy (spot entry)
+  routes.push({
+    id: 'best_entry',
+    title: isDiscount
+      ? `Discount entry: buy ${ticker} below mark price`
+      : `Buy ${ticker} on Jupiter`,
+    tag: 'best_entry',
+    tagLabel: isDiscount ? 'Discount opportunity' : 'Spot buy',
+    steps: [
+      {
+        action: 'buy_spot',
+        protocol: 'Jupiter',
+        asset: ticker,
+        amountUsd,
+        description: isDiscount
+          ? `Buy ${ticker} with $${amountUsd.toLocaleString()} USDC (${Math.abs(premiumPct).toFixed(2)}% below mark price — rare discount)`
+          : `Buy ${ticker} with $${amountUsd.toLocaleString()} USDC (${premiumLabel}, mark price ${priceStr})`,
+        url: `https://jup.ag/swap/USDC-${mintAddress}`,
+      },
+    ],
+    projectedApy: null,
+    totalAmountUsd: amountUsd,
+    reasoning: isDiscount
+      ? `${ticker} is trading ${Math.abs(premiumPct).toFixed(2)}% below its mark price — a discount entry on a pre-IPO token. These rarely go below mark; buying now gives immediate edge before the premium reverts.`
+      : isBullish
+      ? `${ticker} is up ${momentum24h.toFixed(1)}% in 24h with positive momentum. Pre-IPO tokens on Jupiter can move fast — buying with full position captures the upside directly.`
+      : `Direct spot buy via Jupiter. ${ticker} is a pre-IPO token with no vault or lending — hold in wallet after purchase.`,
+    warnings: isExpensive
+      ? [`${ticker} is ${premiumPct.toFixed(2)}% above mark price — on-chain price exceeds the reference valuation`]
+      : [],
+    confidence: isDiscount ? 'high' : isBullish ? 'high' : 'medium',
+  })
+
+  // Route 2: Buy and hold (long-term conviction)
+  if (!isBearish) {
+    routes.push({
+      id: 'max_yield',
+      title: `Long-term hold: buy and hold ${ticker}`,
+      tag: 'max_yield',
+      tagLabel: 'Long-term hold',
+      steps: [
+        {
+          action: 'buy_spot',
+          protocol: 'Jupiter',
+          asset: ticker,
+          amountUsd,
+          description: `Buy $${amountUsd.toLocaleString()} ${ticker} and hold in wallet — bet on pre-IPO valuation appreciation`,
+          url: `https://jup.ag/swap/USDC-${mintAddress}`,
+        },
+      ],
+      projectedApy: null,
+      totalAmountUsd: amountUsd,
+      reasoning: `${ticker} is a private company token. There is no vault yield or DeFi integration — this is a pure directional trade on the company's pre-IPO valuation. Suitable for investors with strong conviction on the company's long-term trajectory.`,
+      warnings: [
+        'Pre-IPO tokens carry illiquidity risk — on-chain liquidity may be limited compared to public stocks',
+        'Mark price is indicative only; actual secondary market price may diverge significantly',
+      ],
+      confidence: 'medium',
+    })
+  }
+
+  // Route 3: Defensive (small position, wait for better price)
+  if (isBearish || isExpensive || riskTolerance === 'low') {
+    const splitSpot = amountUsd * 0.3
+    const holdUsdc = amountUsd * 0.7
+    routes.push({
+      id: 'defensive',
+      title: isExpensive
+        ? `Wait for mark price to catch up: small test position`
+        : `Cautious entry: 30% position, hold rest in USDC`,
+      tag: 'defensive',
+      tagLabel: 'Low risk',
+      steps: [
+        {
+          action: 'buy_spot',
+          protocol: 'Jupiter',
+          asset: ticker,
+          amountUsd: splitSpot,
+          description: `Buy only 30% ($${splitSpot.toLocaleString()}) now to test the position`,
+          url: `https://jup.ag/swap/USDC-${mintAddress}`,
+        },
+        {
+          action: 'hold_usdc',
+          protocol: 'Wallet',
+          asset: 'USDC',
+          amountUsd: holdUsdc,
+          description: `Hold 70% ($${holdUsdc.toLocaleString()}) in USDC — add more once ${isExpensive ? 'on-chain premium narrows' : isBearish ? 'price stabilizes' : 'a better entry appears'}`,
+        },
+      ],
+      projectedApy: null,
+      totalAmountUsd: amountUsd,
+      reasoning: isExpensive
+        ? `${ticker} on-chain price is ${premiumPct.toFixed(2)}% above mark — expensive entry. Start with 30% and wait for the premium to narrow before adding.`
+        : isBearish
+        ? `${ticker} dropped ${Math.abs(momentum24h).toFixed(1)}% in 24h. Pre-IPO tokens can be illiquid in downturns. Build a small initial position and wait for stabilization.`
+        : `Conservative approach: take a small test position and hold the majority in USDC until you see a clearer signal.`,
+      warnings: isExpensive
+        ? [`Paying ${premiumPct.toFixed(2)}% above mark price — higher entry cost relative to reference valuation`]
+        : isBearish
+        ? [`Down ${Math.abs(momentum24h).toFixed(1)}% in 24h — bearish short-term trend`]
+        : [],
+      confidence: 'high',
+    })
+  }
+
+  return routes.sort((a, b) => {
+    if (a.disabled && !b.disabled) return 1
+    if (!a.disabled && b.disabled) return -1
+    return 0
+  })
+}
+
 // ─── Route generation logic ─────────────────────────────────────────────────
+
+// Minimum TVL (USD) required before recommending a pool
+const MIN_POOL_TVL = 500
+
+function selectBestYieldPool(
+  vaultApy: number, vaultTvl: number,
+  kaminoApy: number, kaminoTvl: number,
+): { protocol: string; action: RouteAction; apy: number; tvl: number } {
+  // Vault is always eligible — APY is deterministic (we control the contract).
+  // Only gate Kamino by TVL to avoid routing into empty third-party pools.
+  const kaminoEligible = kaminoTvl >= MIN_POOL_TVL && kaminoApy > 0
+
+  if (!kaminoEligible) {
+    return { protocol: 'OnStock Vault', action: 'vault_deposit', apy: vaultApy, tvl: vaultTvl }
+  }
+  // Kamino is eligible — APY difference < 1%: pick higher TVL; otherwise pick higher APY
+  if (Math.abs(vaultApy - kaminoApy) < 1.0) {
+    return vaultTvl >= kaminoTvl
+      ? { protocol: 'OnStock Vault', action: 'vault_deposit', apy: vaultApy, tvl: vaultTvl }
+      : { protocol: 'Kamino',        action: 'kamino_supply', apy: kaminoApy, tvl: kaminoTvl }
+  }
+  return vaultApy >= kaminoApy
+    ? { protocol: 'OnStock Vault', action: 'vault_deposit', apy: vaultApy, tvl: vaultTvl }
+    : { protocol: 'Kamino',        action: 'kamino_supply', apy: kaminoApy, tvl: kaminoTvl }
+}
 
 function buildRoutes(
   ticker: string,
@@ -158,13 +350,16 @@ function buildRoutes(
   momentum24h: number,
   vaultApy: number,
   kaminoApy: number,
+  vaultTvl: number,
+  kaminoTvl: number,
   oraclePrice: number | null,
 ): RecommendedRoute[] {
 
   const routes: RecommendedRoute[] = []
-  const bestYieldApy = Math.max(vaultApy, kaminoApy)
-  const bestYieldProtocol = vaultApy >= kaminoApy ? 'OnStack Vault' : 'Kamino'
-  const bestYieldAction: RouteAction = vaultApy >= kaminoApy ? 'vault_deposit' : 'kamino_supply'
+  const best = selectBestYieldPool(vaultApy, vaultTvl, kaminoApy, kaminoTvl)
+  const bestYieldApy      = best.apy
+  const bestYieldProtocol = best.protocol
+  const bestYieldAction   = best.action
 
   const premiumLabel = premiumPct > 0
     ? `premium +${premiumPct.toFixed(2)}%`
@@ -203,7 +398,7 @@ function buildRoutes(
           description: isDiscount
             ? `Buy ${xstockSymbol} with $${buyAmount.toLocaleString()} USDC (currently at ${Math.abs(premiumPct).toFixed(2)}% discount, below the real stock price)`
             : `Buy ${xstockSymbol} with $${buyAmount.toLocaleString()} USDC (${premiumLabel})`,
-          url: `https://jup.ag/swap/USDC-${xstockSymbol}`,
+          url: `https://jup.ag/swap/USDC-${TICKER_TO_SOLANA_MINT[ticker] ?? xstockSymbol}`,
         },
         {
           action: bestYieldAction,
@@ -229,10 +424,14 @@ function buildRoutes(
   // ── Route 2: Max Yield (maximize yield as the objective) ──────────────────
   {
     // Compare: full position Vault vs full position Kamino vs split strategy
+    // Blend only when both pools have sufficient TVL and similar APY
     const splitVault = amountUsd * 0.7
     const splitKamino = amountUsd * 0.3
     const blendedApy = (vaultApy * 0.7 + kaminoApy * 0.3)
-    const useBlend = kaminoApy > 0 && Math.abs(vaultApy - kaminoApy) < 2
+    const useBlend = kaminoApy > 0
+      && Math.abs(vaultApy - kaminoApy) < 2
+      && vaultTvl >= MIN_POOL_TVL
+      && kaminoTvl >= MIN_POOL_TVL
 
     routes.push({
       id: 'max_yield',
@@ -249,7 +448,7 @@ function buildRoutes(
               asset: xstockSymbol,
               amountUsd,
               description: `Buy $${amountUsd.toLocaleString()} ${xstockSymbol}`,
-              url: `https://jup.ag/swap/USDC-${xstockSymbol}`,
+              url: `https://jup.ag/swap/USDC-${TICKER_TO_SOLANA_MINT[ticker] ?? xstockSymbol}`,
             },
             {
               action: 'vault_deposit',
@@ -275,7 +474,7 @@ function buildRoutes(
               asset: xstockSymbol,
               amountUsd,
               description: `Buy $${amountUsd.toLocaleString()} ${xstockSymbol}`,
-              url: `https://jup.ag/swap/USDC-${xstockSymbol}`,
+              url: `https://jup.ag/swap/USDC-${TICKER_TO_SOLANA_MINT[ticker] ?? xstockSymbol}`,
             },
             {
               action: bestYieldAction,
@@ -464,13 +663,47 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
     throw new Error(`Unsupported asset: ${ticker}. Supported: ${Object.keys(TICKER_TO_XSTOCK).join(', ')}`)
   }
 
-  const [signals, apys] = await Promise.all([
-    readMarketSignals(ticker),
-    readApySignals(xstockSymbol),
-  ])
+  const isPreIpo = PRE_IPO_TICKERS.has(ticker)
 
+  const signals = await readMarketSignals(ticker)
   const { oraclePrice, onchainPrice, premiumPct, momentum24h } = signals
-  const { vaultApy, kaminoApy } = apys
+
+  // Pre-IPO tokens: no vault, no Kamino, no leverage — swap-only routes
+  if (isPreIpo) {
+    const routes = buildPreIpoRoutes(
+      ticker,
+      req.amountUsd,
+      req.riskTolerance,
+      premiumPct,
+      momentum24h,
+      oraclePrice,
+    )
+    const priceStr = oraclePrice ? `$${oraclePrice.toFixed(2)}` : 'unknown'
+    const premiumStr = premiumPct > 0
+      ? `on-chain premium +${premiumPct.toFixed(2)}%`
+      : `on-chain discount ${premiumPct.toFixed(2)}%`
+    const momentumStr = momentum24h > 0
+      ? `up ${momentum24h.toFixed(1)}% in 24h`
+      : `down ${Math.abs(momentum24h).toFixed(1)}% in 24h`
+    return {
+      asset: ticker,
+      xstockSymbol,
+      amountUsd: req.amountUsd,
+      oraclePrice,
+      onchainPrice,
+      premiumPct,
+      momentum24h,
+      bestVaultApy: 0,
+      bestKaminoApy: 0,
+      routes,
+      marketSummary: `${ticker} mark price ${priceStr}, ${premiumStr}, ${momentumStr} — pre-IPO token, tradeable on Jupiter`,
+      generatedAt: new Date().toISOString(),
+    }
+  }
+
+  // xStocks: full route generation with vault + Kamino + leverage
+  const apys = await readApySignals(xstockSymbol)
+  const { vaultApy, kaminoApy, vaultTvl, kaminoTvl } = apys
 
   const routes = buildRoutes(
     ticker,
@@ -481,6 +714,8 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
     momentum24h,
     vaultApy,
     kaminoApy,
+    vaultTvl,
+    kaminoTvl,
     oraclePrice,
   )
 

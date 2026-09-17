@@ -31,4 +31,15 @@ export const CANONICAL_ASSETS: Omit<CanonicalAsset, 'instruments' | 'bestBuy' | 
   { ticker: 'SNDK',  name: 'SanDisk Corp.',         sector: 'Technology', type: 'stock' },
   { ticker: 'INTC',  name: 'Intel Corp.',           sector: 'Technology', type: 'stock' },
   { ticker: 'MU',    name: 'Micron Technology',     sector: 'Technology', type: 'stock' },
+
+  // ─── PreStocks — Pre-IPO ───
+  { ticker: 'ANTHROPIC',  name: 'Anthropic',         sector: 'AI',         type: 'pre-ipo' },
+  { ticker: 'OPENAI',     name: 'OpenAI',            sector: 'AI',         type: 'pre-ipo' },
+  { ticker: 'SPACEX',     name: 'SpaceX',            sector: 'Aerospace',  type: 'pre-ipo' },
+  { ticker: 'ANDURIL',    name: 'Anduril Industries', sector: 'Defense',   type: 'pre-ipo' },
+  { ticker: 'NEURALINK',  name: 'Neuralink',         sector: 'Biotech',    type: 'pre-ipo' },
+  { ticker: 'FIGUREAI',   name: 'Figure AI',         sector: 'Robotics',   type: 'pre-ipo' },
+  { ticker: 'XAI',        name: 'xAI',               sector: 'AI',         type: 'pre-ipo' },
+  { ticker: 'POLYMARKET', name: 'Polymarket',        sector: 'Finance',    type: 'pre-ipo' },
+  { ticker: 'KALSHI',     name: 'Kalshi',            sector: 'Finance',    type: 'pre-ipo' },
 ]

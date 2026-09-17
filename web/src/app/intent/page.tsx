@@ -5,7 +5,9 @@ export const metadata = {
   description: 'Describe your investment intent, the system generates optimal execution paths from real-time market signals',
 }
 
-export default function IntentPage() {
+export default function IntentPage({ searchParams }: { searchParams: { asset?: string } }) {
+  const initialAsset = searchParams.asset?.toUpperCase() || 'TSLA'
+
   return (
     <div style={{ minHeight: '100vh', background: '#F8FAFC', paddingTop: 32 }}>
       {/* Page Header */}
@@ -28,7 +30,7 @@ export default function IntentPage() {
         </p>
       </div>
 
-      <IntentPanel />
+      <IntentPanel initialAsset={initialAsset} />
     </div>
   )
 }

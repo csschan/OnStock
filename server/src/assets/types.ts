@@ -72,7 +72,7 @@ export interface CanonicalAsset {
   ticker: string                   // 'AAPL'
   name: string                     // 'Apple Inc.'
   sector: string                   // 'Technology'
-  type: 'stock' | 'etf'
+  type: 'stock' | 'etf' | 'pre-ipo'
 
   // 传统市场参考价
   marketPrice: number | null       // Yahoo Finance / NASDAQ

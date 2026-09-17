@@ -1330,6 +1330,7 @@ router.post('/portfolio/build-batch', async (req, res) => {
       return res.status(400).json({ ok: false, error: `Positions must sum to 100% (got ${totalPct}%)` })
     }
 
+    // Portfolio Builder only supports vault-backed xStocks (not pre-IPO — no mainnet vault)
     const TICKER_MAP: Record<string, string> = {
       TSLA: 'TSLAx', NVDA: 'NVDAx', SPY: 'SPYx', AAPL: 'AAPLx',
       GOOGL: 'GOOGLx', META: 'METAx', COIN: 'COINx', MSTR: 'MSTRx',
@@ -1839,7 +1840,8 @@ router.post('/intent/route', async (req, res) => {
 
 // POST /api/intent/execute-entry
 // devnet:  只构建 Vault deposit tx（测试 token 直接存）
-// mainnet: 构建 Jupiter swap tx + Vault deposit tx（双签）
+// mainnet xStocks: Jupiter swap tx + Vault deposit tx（双签）
+// mainnet PreStocks: Jupiter swap tx only（no vault on mainnet）
 // body: { asset: 'TSLA', amountUsd: 1000, walletAddress: '...' }
 router.post('/intent/execute-entry', async (req, res) => {
   try {
@@ -1850,9 +1852,16 @@ router.post('/intent/execute-entry', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Missing asset, amountUsd, or walletAddress' })
     }
 
+    // pre-IPO tickers: no mainnet vault, swap-only on mainnet
+    const PRE_IPO_TICKERS = new Set(['ANTHROPIC','OPENAI','SPACEX','ANDURIL','NEURALINK','FIGUREAI','XAI','POLYMARKET','KALSHI'])
+
     const TICKER_MAP: Record<string, string> = {
       TSLA: 'TSLAx', NVDA: 'NVDAx', SPY: 'SPYx', AAPL: 'AAPLx',
       GOOGL: 'GOOGLx', META: 'METAx', COIN: 'COINx', MSTR: 'MSTRx',
+      // PreStocks — pre-IPO tokens (mainnet: swap-only, devnet: vault demo)
+      ANTHROPIC: 'ANTHROPIC', OPENAI: 'OPENAI', SPACEX: 'SPACEX',
+      ANDURIL: 'ANDURIL', NEURALINK: 'NEURALINK', FIGUREAI: 'FIGUREAI',
+      XAI: 'XAI', POLYMARKET: 'POLYMARKET', KALSHI: 'KALSHI',
     }
     const xstockSymbol = TICKER_MAP[asset.toUpperCase()]
     if (!xstockSymbol) {
@@ -1875,7 +1884,7 @@ router.post('/intent/execute-entry', async (req, res) => {
     const userPk     = new PublicKey(walletAddress)
     const XSTOCK_DECIMALS = 6
 
-    // ── Mint 地址：devnet 用测试 mint，mainnet 用 Backed Finance ──────────
+    // ── Mint 地址：devnet 用测试 mint，mainnet 用 Backed Finance / PreStocks ──
     const DEVNET_MINTS: Record<string, string> = {
       TSLAx: '57iTEvgXrXTELN2pXfP3hupauPah1Sep1jXeBJKSZase',
       NVDAx: 'HbxyTFGHosSW6JTjZJQDWgbwD1vjdCBrmM74yEPMYdmU',
@@ -1885,6 +1894,16 @@ router.post('/intent/execute-entry', async (req, res) => {
       METAx: '3jdTnxC2DMibnnfG7GuovCK9PMpro7p7tdaTPGDzobAU',
       COINx: 'D35oALKAHTHr2wKQSTVLUALCWCijjjdpQSq53jrQsFTC',
       MSTRx: '9BqDyWHHmk4nK252REa48fCaMTWmCZg4muaWDcobpDcN',
+      // PreStocks devnet mints (no freeze_authority, vaults initialized)
+      ANTHROPIC:  'G1YqLznYbDvgX8cBsvj6X9iKw7bmpfuc1hFwxAGQtGMo',
+      OPENAI:     '3dRAhtUNCtR3ij3XSzuGjdRQp4YewYE4c41kATth8NHq',
+      SPACEX:     'GtBFuUEzaHfZXrfkkgXBsaFuouQY9NmwcwTqAytiZEMq',
+      ANDURIL:    '8qimDxQteXcEHvhqFRzAYg2kaGn1CupRvX6shLEHuJSq',
+      NEURALINK:  'FUBGQdxqMCQSf7v5jy3HWUAUdeDBBH1r5whYQqqxBxbb',
+      FIGUREAI:   'DZ36QjeBoTiYt3UPMW22XRAZyT6SMQ3yBTKhHv2vZU4a',
+      XAI:        '9Q3d6zXM4dnURonfV8ctyt95veMDH9H2ppEPaLu5sou7',
+      POLYMARKET: '5ud1mej5hKajdywEU79QR6gttwKb9LqNpFehWt9gNAUP',
+      KALSHI:     '2yjAftmo5EthNqEX3BJE2u7un9Td3vJW7Dvmg4cPMVSh',
     }
     const MAINNET_MINTS: Record<string, string> = {
       TSLAx: 'XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB',
@@ -1895,11 +1914,21 @@ router.post('/intent/execute-entry', async (req, res) => {
       METAx: 'XsCqFRredZFCKAS9WJaWkFwax5oNfgnPJLPPDiPzfdS',
       COINx: 'Xs6CiCjqSEVMZPfPfWfMsfQ3ZLm3djJaH5W5s4J2Npb',
       MSTRx: 'XsMfJjQxk5TGsqpPiGk3tuJmNjQ8CZHARQb5qeuHb3b',
+      // PreStocks — Solana mainnet SPL tokens (prestocks.com/products)
+      ANTHROPIC:  'Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw',
+      OPENAI:     'PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF',
+      SPACEX:     'PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh',
+      ANDURIL:    'PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB',
+      NEURALINK:  'PrekqLJvJ3qVdXmBGDiexvwUTF4rLFDa6HWS4HJbw9S',
+      FIGUREAI:   'PreZad18qfPtbxNpMtMuAuX2zVpvkEU8DnJx56faCWd',
+      XAI:        'PreC1KtJ1sBPPqaeeqL6Qb15GTLCYVvyYEwxhdfTwfx',
+      POLYMARKET: 'Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP',
+      KALSHI:     'PreLWGkkeqG1s4HEfFZSy9moCrJ7btsHuUtfcCeoRua',
     }
-    const mintMap = isDevnet ? DEVNET_MINTS : MAINNET_MINTS
+    const mintMap = isDevnet ? { ...DEVNET_MINTS, ...MAINNET_MINTS } : MAINNET_MINTS
     const xstockMintStr = mintMap[xstockSymbol]
     if (!xstockMintStr) {
-      return res.status(400).json({ ok: false, error: `No ${isDevnet ? 'devnet' : 'mainnet'} mint for ${xstockSymbol}` })
+      return res.status(400).json({ ok: false, error: `No mint for ${xstockSymbol}` })
     }
 
     const xstockMint = new PublicKey(xstockMintStr)
@@ -1919,9 +1948,12 @@ router.post('/intent/execute-entry', async (req, res) => {
 
     // ── devnet：build single-signer USDC transfer tx (user → pool) ─────────
     // ── mainnet：Jupiter quote + swap tx ───────────────────────────────────
+    const isPreIpo = PRE_IPO_TICKERS.has(asset.toUpperCase())
+
     let xstockAmountRaw: number
     let swapTransaction: string | null = null
     let swapLastValidBlockHeight: number | null = null
+    let serverMintSig: string | null = null
     let priceImpactPct = 0
 
     if (isDevnet) {
@@ -1967,7 +1999,25 @@ router.post('/intent/execute-entry', async (req, res) => {
         if (c === 'confirmed' || c === 'finalized') break
         if (st?.value?.err) throw new Error(`xStock mint failed: ${JSON.stringify(st.value.err)}`)
       }
-      // No swap tx for user to sign — swapTransaction stays null
+      serverMintSig = mintSig
+
+      // For pre-IPO on devnet: build a user-signed "purchase confirmation" tx
+      // (small SOL transfer user → mintAuthority as demo protocol fee)
+      // This triggers the Phantom wallet popup so the demo looks realistic.
+      if (isPreIpo) {
+        const { SystemProgram, LAMPORTS_PER_SOL } = require('@solana/web3.js')
+        // Reuse mintBh — already fresh, avoids an extra getLatestBlockhash RPC call
+        const confirmTx = new Transaction()
+        confirmTx.recentBlockhash = mintBh
+        confirmTx.feePayer = userPk
+        confirmTx.add(SystemProgram.transfer({
+          fromPubkey: userPk,
+          toPubkey: mintAuthority.publicKey,
+          lamports: Math.floor(0.001 * LAMPORTS_PER_SOL), // 0.001 SOL demo fee
+        }))
+        swapTransaction = confirmTx.serialize({ requireAllSignatures: false }).toString('base64')
+        swapLastValidBlockHeight = 0
+      }
     } else {
       // mainnet：Jupiter quote USDC → xStock
       const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
@@ -2001,67 +2051,77 @@ router.post('/intent/execute-entry', async (req, res) => {
       swapLastValidBlockHeight = swapData.lastValidBlockHeight
     }
 
-    // ── Vault deposit tx（devnet + mainnet 共用）────────────────────────────
-    const amountBuf = Buffer.alloc(8)
-    amountBuf.writeBigUInt64LE(BigInt(xstockAmountRaw))
-    const depositIxData = Buffer.concat([DEPOSIT_DISC, amountBuf])
+    // ── Vault deposit tx: xStocks only（PreStocks have no mainnet vault）────
+    const buildVault = !isPreIpo  // pre-IPO never gets vault deposit (no vault on any network)
 
-    const { blockhash, lastValidBlockHeight: depositHeight } = await connection.getLatestBlockhash()
-    const depositTx = new Transaction()
-    depositTx.recentBlockhash = blockhash
-    depositTx.feePayer = userPk
-    // Pre-add compute budget so Phantom does not inject its own (causes Alchemy forwarding issues)
-    depositTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 60_000 }))
-    depositTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5000 }))
+    let depositTxB64: string | null = null
+    let depositBlockhash: string | null = null
+    let depositHeight: number | null = null
 
-    try {
-      await getAccount(connection, userReceiptAta, 'confirmed', TOKEN_PROGRAM_ID)
-    } catch {
-      depositTx.add(createAssociatedTokenAccountInstruction(
-        userPk, userReceiptAta, userPk, receiptMint, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
-      ))
+    if (buildVault) {
+      const amountBuf = Buffer.alloc(8)
+      amountBuf.writeBigUInt64LE(BigInt(xstockAmountRaw))
+      const depositIxData = Buffer.concat([DEPOSIT_DISC, amountBuf])
+
+      const { blockhash, lastValidBlockHeight: dvh } = await connection.getLatestBlockhash()
+      depositBlockhash = blockhash
+      depositHeight = dvh
+      const depositTx = new Transaction()
+      depositTx.recentBlockhash = blockhash
+      depositTx.feePayer = userPk
+      depositTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 60_000 }))
+      depositTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5000 }))
+
+      try {
+        await getAccount(connection, userReceiptAta, 'confirmed', TOKEN_PROGRAM_ID)
+      } catch {
+        depositTx.add(createAssociatedTokenAccountInstruction(
+          userPk, userReceiptAta, userPk, receiptMint, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+        ))
+      }
+
+      depositTx.add(new TransactionInstruction({
+        programId,
+        keys: [
+          { pubkey: userPk,          isSigner: true,  isWritable: true  },
+          { pubkey: vaultPda,        isSigner: false, isWritable: true  },
+          { pubkey: receiptMint,     isSigner: false, isWritable: true  },
+          { pubkey: userXstockAta,   isSigner: false, isWritable: true  },
+          { pubkey: vaultXstockAta,  isSigner: false, isWritable: true  },
+          { pubkey: userReceiptAta,  isSigner: false, isWritable: true  },
+          { pubkey: userPositionPda, isSigner: false, isWritable: true  },
+          { pubkey: TOKEN_PROGRAM_ID,            isSigner: false, isWritable: false },
+          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+          { pubkey: SystemProgram.programId,     isSigner: false, isWritable: false },
+        ],
+        data: depositIxData,
+      }))
+
+      depositTxB64 = depositTx.serialize({ requireAllSignatures: false }).toString('base64')
     }
-
-    depositTx.add(new TransactionInstruction({
-      programId,
-      keys: [
-        { pubkey: userPk,          isSigner: true,  isWritable: true  },
-        { pubkey: vaultPda,        isSigner: false, isWritable: true  },
-        { pubkey: receiptMint,     isSigner: false, isWritable: true  },
-        { pubkey: userXstockAta,   isSigner: false, isWritable: true  },
-        { pubkey: vaultXstockAta,  isSigner: false, isWritable: true  },
-        { pubkey: userReceiptAta,  isSigner: false, isWritable: true  },
-        { pubkey: userPositionPda, isSigner: false, isWritable: true  },
-        { pubkey: TOKEN_PROGRAM_ID,            isSigner: false, isWritable: false },
-        { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-        { pubkey: SystemProgram.programId,     isSigner: false, isWritable: false },
-      ],
-      data: depositIxData,
-    }))
-
-    const depositTxB64 = depositTx.serialize({ requireAllSignatures: false }).toString('base64')
 
     res.json({
       ok: true,
       data: {
-        // devnet-swap: mock swap tx (partial-signed by server) + deposit tx
-        // mainnet: Jupiter swap tx + deposit tx
-        mode: isDevnet ? 'devnet-swap' : 'mainnet',
+        // mode: devnet-swap | devnet-preipo | mainnet | swap-only
+        mode: isDevnet ? (isPreIpo ? 'devnet-preipo' : 'devnet-swap') : (isPreIpo ? 'swap-only' : 'mainnet'),
         mockUsdcMint: isDevnet ? 'DUyFygnq4QBfYF6NezG8A7t95PETDPWPz3PeBJVUhN8k' : null,
         // Tx 1: swap (mainnet=Jupiter, devnet=mock swap partial-signed by server)
         swapTransaction,
         swapLastValidBlockHeight,
-        // Tx 2: Vault deposit
+        // devnet only: server-side mint sig (returned so frontend can show explorer link)
+        serverMintSig,
+        // Tx 2: Vault deposit (null for pre-IPO on mainnet)
         depositTransaction: depositTxB64,
-        depositBlockhash: blockhash,
+        depositBlockhash,
         depositLastValidBlockHeight: depositHeight,
         // Meta
         xstockSymbol,
         usdcIn: amountUsd,
         xstockOut: xstockAmountRaw / 10 ** XSTOCK_DECIMALS,
         priceImpactPct,
-        vaultPda: vaultPda.toBase58(),
-        receiptMint: receiptMint.toBase58(),
+        vaultPda: buildVault ? vaultPda.toBase58() : null,
+        receiptMint: buildVault ? receiptMint.toBase58() : null,
       },
     })
   } catch (err: any) {

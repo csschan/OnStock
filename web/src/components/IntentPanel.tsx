@@ -6,15 +6,27 @@ import { useIntentExecute } from '@/hooks/useIntentExecute'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'
 
-const SUPPORTED_ASSETS = [
-  { ticker: 'TSLA', name: 'Tesla',     xstock: 'TSLAx' },
-  { ticker: 'NVDA', name: 'NVIDIA',    xstock: 'NVDAx' },
-  { ticker: 'SPY',  name: 'S&P 500',   xstock: 'SPYx'  },
-  { ticker: 'AAPL', name: 'Apple',     xstock: 'AAPLx' },
-  { ticker: 'GOOGL',name: 'Google',    xstock: 'GOOGLx'},
-  { ticker: 'META', name: 'Meta',      xstock: 'METAx' },
-  { ticker: 'COIN', name: 'Coinbase',  xstock: 'COINx' },
-  { ticker: 'MSTR', name: 'MicroStrategy', xstock: 'MSTRx' },
+const XSTOCK_ASSETS = [
+  { ticker: 'TSLA',  name: 'Tesla'          },
+  { ticker: 'NVDA',  name: 'NVIDIA'         },
+  { ticker: 'SPY',   name: 'S&P 500'        },
+  { ticker: 'AAPL',  name: 'Apple'          },
+  { ticker: 'GOOGL', name: 'Google'         },
+  { ticker: 'META',  name: 'Meta'           },
+  { ticker: 'COIN',  name: 'Coinbase'       },
+  { ticker: 'MSTR',  name: 'MicroStrategy'  },
+]
+
+const PRE_IPO_ASSETS = [
+  { ticker: 'ANTHROPIC',  name: 'Anthropic'       },
+  { ticker: 'OPENAI',     name: 'OpenAI'          },
+  { ticker: 'SPACEX',     name: 'SpaceX'          },
+  { ticker: 'ANDURIL',    name: 'Anduril'         },
+  { ticker: 'NEURALINK',  name: 'Neuralink'       },
+  { ticker: 'FIGUREAI',   name: 'Figure AI'       },
+  { ticker: 'XAI',        name: 'xAI'             },
+  { ticker: 'POLYMARKET', name: 'Polymarket'      },
+  { ticker: 'KALSHI',     name: 'Kalshi'          },
 ]
 
 const ACTION_LABELS: Record<string, { label: string; color: string; bg: string }> = {
@@ -124,13 +136,14 @@ const EXEC_STATUS_LABEL: Record<string, string> = {
   error:             'Execution failed',
 }
 
-function RouteCard({ route, isTop, onExecute, execStatus, execError, execResult }: {
+function RouteCard({ route, isTop, isPreIpo, onExecute, execStatus, execError, execResult }: {
   route: RecommendedRoute
   isTop: boolean
+  isPreIpo?: boolean
   onExecute?: () => void
   execStatus?: string
   execError?: string | null
-  execResult?: { swapTxHash: string; depositTxHash: string; xstockOut: number; xstockSymbol: string } | null
+  execResult?: { swapTxHash: string; depositTxHash: string | null; xstockOut: number; xstockSymbol: string; mode?: string } | null
 }) {
   const [expanded, setExpanded] = useState(isTop)
   const tagStyle = TAG_STYLE[route.tag] ?? TAG_STYLE.defensive
@@ -226,17 +239,22 @@ function RouteCard({ route, isTop, onExecute, execStatus, execError, execResult 
                   borderRadius: 10, padding: '12px 14px',
                 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#16A34A', marginBottom: 8 }}>
-                    Success! Received {execResult.xstockOut.toFixed(4)} {execResult.xstockSymbol}, deposited to Vault
+                    Success! Received {execResult.xstockOut.toFixed(4)} {execResult.xstockSymbol}
+                    {execResult.depositTxHash ? ', deposited to Vault' : ' (held in wallet)'}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <a href={`https://solscan.io/tx/${execResult.swapTxHash}`} target="_blank" rel="noopener noreferrer"
-                      style={{ fontSize: 11, color: '#2563EB' }}>
-                      Swap tx: {execResult.swapTxHash.slice(0, 12)}... →
-                    </a>
-                    <a href={`https://solscan.io/tx/${execResult.depositTxHash}`} target="_blank" rel="noopener noreferrer"
-                      style={{ fontSize: 11, color: '#0EA5E9' }}>
-                      Vault deposit tx: {execResult.depositTxHash.slice(0, 12)}... →
-                    </a>
+                    {execResult.swapTxHash && (
+                      <a href={`https://solscan.io/tx/${execResult.swapTxHash}?cluster=devnet`} target="_blank" rel="noopener noreferrer"
+                        style={{ fontSize: 11, color: '#2563EB' }}>
+                        Swap tx: {execResult.swapTxHash.slice(0, 12)}... →
+                      </a>
+                    )}
+                    {execResult.depositTxHash && (
+                      <a href={`https://solscan.io/tx/${execResult.depositTxHash}?cluster=devnet`} target="_blank" rel="noopener noreferrer"
+                        style={{ fontSize: 11, color: '#0EA5E9' }}>
+                        Vault deposit tx: {execResult.depositTxHash.slice(0, 12)}... →
+                      </a>
+                    )}
                   </div>
                 </div>
               ) : execStatus && execStatus !== 'idle' && execStatus !== 'error' ? (
@@ -261,12 +279,14 @@ function RouteCard({ route, isTop, onExecute, execStatus, execError, execResult 
                     disabled={!!execStatus && execStatus !== 'idle' && execStatus !== 'error'}
                     style={{
                       width: '100%', padding: '13px', borderRadius: 10,
-                      background: 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%)',
+                      background: isPreIpo
+                        ? 'linear-gradient(135deg, #7C3AED 0%, #9945FF 100%)'
+                        : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%)',
                       color: '#fff', border: 'none', fontSize: 14, fontWeight: 800,
                       cursor: 'pointer', letterSpacing: '0.02em',
                     }}
                   >
-                    Execute: Swap + Vault Deposit →
+                    {isPreIpo ? 'Execute: Buy Pre-IPO Token →' : 'Execute: Swap + Vault Deposit →'}
                   </button>
                   {execError && (
                     <div style={{ fontSize: 11, color: '#DC2626', marginTop: 6, textAlign: 'center' }}>
@@ -283,9 +303,9 @@ function RouteCard({ route, isTop, onExecute, execStatus, execError, execResult 
   )
 }
 
-export default function IntentPanel() {
+export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: string }) {
   const { connected, publicKey, connect: connectPhantom } = usePhantom()
-  const [asset, setAsset] = useState('TSLA')
+  const [asset, setAsset] = useState(initialAsset)
   const [amountUsd, setAmountUsd] = useState('1000')
   const [risk, setRisk] = useState<'low' | 'medium' | 'high'>('medium')
   const [loading, setLoading] = useState(false)
@@ -360,11 +380,20 @@ export default function IntentPanel() {
                 background: '#F8FAFC', outline: 'none',
               }}
             >
-              {SUPPORTED_ASSETS.map(a => (
-                <option key={a.ticker} value={a.ticker}>
-                  {a.ticker} — {a.name}
-                </option>
-              ))}
+              <optgroup label="Tokenized Stocks &amp; ETFs">
+                {XSTOCK_ASSETS.map(a => (
+                  <option key={a.ticker} value={a.ticker}>
+                    {a.ticker} — {a.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Pre-IPO Tokens (PreStocks)">
+                {PRE_IPO_ASSETS.map(a => (
+                  <option key={a.ticker} value={a.ticker}>
+                    {a.ticker} — {a.name}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
 
@@ -526,6 +555,7 @@ export default function IntentPanel() {
           </div>
           {result.routes.map((route, i) => {
             const isTop = i === 0 && !route.disabled
+            const isPreIpo = result.bestVaultApy === 0 && result.bestKaminoApy === 0
             const canExecute = !route.disabled && route.steps.some(s => s.action === 'vault_deposit' || s.action === 'buy_spot')
             const isActiveExec = execRouteId === route.id
             return (
@@ -533,6 +563,7 @@ export default function IntentPanel() {
                 key={route.id}
                 route={route}
                 isTop={isTop}
+                isPreIpo={isPreIpo}
                 onExecute={canExecute
                   ? () => {
                       if (!connected) { connectPhantom(); return }

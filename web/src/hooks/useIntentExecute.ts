@@ -18,13 +18,14 @@ export type ExecStatus =
 
 export interface ExecResult {
   swapTxHash: string
-  depositTxHash: string
+  depositTxHash: string | null  // null for pre-IPO on mainnet (swap-only, no vault)
   xstockOut: number
   xstockSymbol: string
   usdcIn: number
   priceImpactPct: number
-  vaultPda: string
-  receiptMint: string
+  vaultPda: string | null
+  receiptMint: string | null
+  mode: string
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'
@@ -89,19 +90,27 @@ export function useIntentExecute() {
         mode, swapTransaction, swapLastValidBlockHeight = 0,
         depositTransaction, xstockSymbol, xstockOut,
         usdcIn, priceImpactPct, vaultPda, receiptMint,
+        serverMintSig,
       } = json.data
 
-      let swapSig = ''
+      let swapSig = serverMintSig ?? ''
 
       // ── Tx 1: Swap ───────────────────────────────────────────────────────
       if (swapTransaction) {
         setStatus('signing_swap')
 
         if (mode === 'devnet-swap') {
-          // devnet: server already minted xStock inside execute-entry — swapTransaction should be null.
-          // This branch won't normally be reached, but handle gracefully just in case.
+          // devnet xStock: server already minted — swapTransaction should be null normally
           setStatus('confirming_swap')
-          swapSig = swapTransaction // just record the sig if server returns one
+          swapSig = swapTransaction
+        } else if (mode === 'devnet-preipo') {
+          // devnet pre-IPO: server minted token, user signs a small SOL confirmation tx
+          // blockhash is already embedded by server — no extra RPC call needed
+          const confirmTx = Transaction.from(Buffer.from(swapTransaction, 'base64'))
+          confirmTx.feePayer = publicKey
+          const signedConfirm = await signTransaction(confirmTx)
+          setStatus('confirming_swap')
+          swapSig = await sendAndConfirmDevnet(signedConfirm.serialize())
         } else {
           // Mainnet: Jupiter VersionedTransaction
           const swapTx = VersionedTransaction.deserialize(Buffer.from(swapTransaction, 'base64'))
@@ -117,28 +126,32 @@ export function useIntentExecute() {
         }
       }
 
-      // ── Tx 2: Vault deposit ──────────────────────────────────────────────
-      setStatus('signing_deposit')
-      const depositTx = Transaction.from(Buffer.from(depositTransaction, 'base64'))
+      // ── Tx 2: Vault deposit (skipped for pre-IPO on mainnet) ────────────
+      let depositSig: string | null = null
 
-      // Refresh blockhash before signing to avoid expiry
-      const bhResp = await fetch(`${API_BASE}/tx/blockhash`)
-      const bhJson = await bhResp.json()
-      if (!bhJson.ok) throw new Error('Failed to get blockhash')
-      depositTx.recentBlockhash = bhJson.blockhash
-      depositTx.feePayer = publicKey
+      if (depositTransaction) {
+        setStatus('signing_deposit')
+        const depositTx = Transaction.from(Buffer.from(depositTransaction, 'base64'))
 
-      const signedDeposit = await signTransaction(depositTx)
+        // Refresh blockhash before signing to avoid expiry
+        const bhResp = await fetch(`${API_BASE}/tx/blockhash`)
+        const bhJson = await bhResp.json()
+        if (!bhJson.ok) throw new Error('Failed to get blockhash')
+        depositTx.recentBlockhash = bhJson.blockhash
+        depositTx.feePayer = publicKey
 
-      setStatus('confirming_deposit')
-      // Use server relay (re-broadcasts every 2s to multiple RPCs) — browser direct send was timing out
-      const depositSig = await sendAndConfirmDevnet(signedDeposit.serialize())
+        const signedDeposit = await signTransaction(depositTx)
+
+        setStatus('confirming_deposit')
+        depositSig = await sendAndConfirmDevnet(signedDeposit.serialize())
+      }
 
       setStatus('success')
       setResult({
         swapTxHash: swapSig,
         depositTxHash: depositSig,
         xstockOut, xstockSymbol, usdcIn, priceImpactPct, vaultPda, receiptMint,
+        mode,
       })
     } catch (err: any) {
       console.error('[IntentExecute]', err)

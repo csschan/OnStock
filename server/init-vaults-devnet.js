@@ -16,7 +16,7 @@ const {
 const fs = require('fs'), path = require('path')
 const crypto = require('crypto')
 
-const RPC = 'https://api.devnet.solana.com'
+const RPC = 'https://solana-devnet.g.alchemy.com/v2/0Iqo_XuuVPXQzj87HCEWlW3JHs_zmgLR'
 const PROGRAM_ID = new PublicKey('Dp5XeudXm3dfSNnLLC6M8dPhDXd6nFmMX9SGNCTtGmKx')
 const VAULT_SEED = Buffer.from('vault')
 const RECEIPT_SEED = Buffer.from('receipt')
@@ -67,21 +67,38 @@ async function main() {
     tx.add(new TransactionInstruction({
       programId: PROGRAM_ID,
       keys: [
-        { pubkey: kp.publicKey,          isSigner: true,  isWritable: true  },
-        { pubkey: vaultPda,              isSigner: false, isWritable: true  },
-        { pubkey: xstockMint,            isSigner: false, isWritable: false },
-        { pubkey: receiptMint,           isSigner: false, isWritable: true  },
-        { pubkey: vaultXstockAta,        isSigner: false, isWritable: true  },
-        { pubkey: TOKEN_PROGRAM_ID,      isSigner: false, isWritable: false },
-        { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-        { pubkey: SystemProgram.programId,     isSigner: false, isWritable: false },
-        { pubkey: SYSVAR_RENT_PUBKEY,          isSigner: false, isWritable: false },
+        { pubkey: kp.publicKey,                isSigner: true,  isWritable: true  }, // 0: authority
+        { pubkey: xstockMint,                  isSigner: false, isWritable: false }, // 1: xstock_mint
+        { pubkey: vaultPda,                    isSigner: false, isWritable: true  }, // 2: vault
+        { pubkey: receiptMint,                 isSigner: false, isWritable: true  }, // 3: receipt_mint
+        { pubkey: vaultXstockAta,              isSigner: false, isWritable: true  }, // 4: vault_xstock_ata
+        { pubkey: TOKEN_PROGRAM_ID,            isSigner: false, isWritable: false }, // 5: token_program
+        { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // 6: associated_token_program
+        { pubkey: SystemProgram.programId,     isSigner: false, isWritable: false }, // 7: system_program
+        { pubkey: SYSVAR_RENT_PUBKEY,          isSigner: false, isWritable: false }, // 8: rent
       ],
       data,
     }))
 
     try {
-      const sig = await sendAndConfirmTransaction(conn, tx, [kp], { commitment: 'confirmed' })
+      tx.sign(kp)
+      const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: true })
+
+      // Poll for confirmation (Alchemy devnet doesn't support signatureSubscribe)
+      let confirmed = false
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000))
+        const status = await conn.getSignatureStatuses([sig])
+        const s = status?.value?.[0]
+        if (s?.confirmationStatus === 'confirmed' || s?.confirmationStatus === 'finalized') {
+          if (s.err) throw new Error(`on-chain error: ${JSON.stringify(s.err)}`)
+          confirmed = true
+          break
+        }
+        if (s?.err) throw new Error(`on-chain error: ${JSON.stringify(s.err)}`)
+      }
+      if (!confirmed) throw new Error('Timed out waiting for confirmation')
+
       console.log(`✓ ${sym} vault initialized: ${sig.slice(0,16)}...`)
       console.log(`  vaultPda:    ${vaultPda.toBase58()}`)
       console.log(`  receiptMint: ${receiptMint.toBase58()}`)

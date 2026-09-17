@@ -11,6 +11,7 @@ import { fetchAllSupplies } from './fetchers/supply.js'
 import { fetchAllPoolInfo } from './fetchers/lpPools.js'
 import { fetchHyperliquidPrices, type HyperliquidPrice } from './fetchers/hyperliquid.js'
 import { fetchBinanceCexPrices } from './fetchers/binanceCex.js'
+import { fetchPreStocksPrices } from './fetchers/prestocks.js'
 import type { DexQuote } from './fetchers/oneinch.js'
 import {
   buildAssetGraph,
@@ -46,7 +47,7 @@ function withFallback<T>(p: Promise<T>, ms: number, fallback: T, label: string):
 export async function runFetchCycle() {
   console.log(`\n[Aggregator] Starting fetch cycle at ${new Date().toISOString()}`)
 
-  const [oraclePrices, evmQuotes, solanaQuotes, robinhoodQuotes, uniswapQuotes, pancakeQuotes, hlPrices, binanceCexQuotes] = await Promise.all([
+  const [oraclePrices, evmQuotes, solanaQuotes, robinhoodQuotes, uniswapQuotes, pancakeQuotes, hlPrices, binanceCexQuotes, preStocksResult] = await Promise.all([
     fetchAllStockPrices(),
     fetchAllEvmQuotes(),
     fetchAllSolanaQuotes(),
@@ -55,13 +56,19 @@ export async function runFetchCycle() {
     withFallback(fetchAllPancakeV3Quotes(), 15_000, [], 'PCSv3'),
     fetchHyperliquidPrices(),
     fetchBinanceCexPrices(),
+    fetchPreStocksPrices(),
   ])
+
+  // Merge PreStocks oracle prices (pre-IPO stocks have no Yahoo Finance data)
+  for (const [ticker, price] of preStocksResult.oraclePrices) {
+    if (!oraclePrices.has(ticker)) oraclePrices.set(ticker, price)
+  }
 
   // 存储 Hyperliquid 价格供 API 使用
   _latestHyperliquidPrices = hlPrices
 
-  const allQuotes = [...evmQuotes, ...solanaQuotes, ...robinhoodQuotes, ...uniswapQuotes, ...pancakeQuotes, ...binanceCexQuotes]
-  console.log(`[Aggregator] Got ${allQuotes.length} DEX quotes (KyberSwap: ${evmQuotes.length}, UniV3: ${uniswapQuotes.length}, PCSv3: ${pancakeQuotes.length}, Sol: ${solanaQuotes.length}, RH: ${robinhoodQuotes.length}, BinCEX: ${binanceCexQuotes.length}), ${oraclePrices.size} oracle, ${hlPrices.length} HL perps`)
+  const allQuotes = [...evmQuotes, ...solanaQuotes, ...robinhoodQuotes, ...uniswapQuotes, ...pancakeQuotes, ...binanceCexQuotes, ...preStocksResult.quotes]
+  console.log(`[Aggregator] Got ${allQuotes.length} DEX quotes (KyberSwap: ${evmQuotes.length}, UniV3: ${uniswapQuotes.length}, PCSv3: ${pancakeQuotes.length}, Sol: ${solanaQuotes.length}, RH: ${robinhoodQuotes.length}, BinCEX: ${binanceCexQuotes.length}, PreStocks: ${preStocksResult.quotes.length}), ${oraclePrices.size} oracle, ${hlPrices.length} HL perps`)
 
   // 过滤垃圾报价
   const { valid, junk } = filterQuotes(allQuotes, oraclePrices)

@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import { useState, useCallback } from 'react'
 import { Transaction } from '@solana/web3.js'
+import { usePhantom } from '@/components/PhantomProvider'
 
 export type TxStatus = 'idle' | 'building' | 'signing' | 'confirming' | 'success' | 'error'
 
@@ -29,8 +29,7 @@ export interface UseVaultDepositResult {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'
 
 export function useVaultDeposit(): UseVaultDepositResult {
-  const { connection } = useConnection()
-  const { publicKey, sendTransaction } = useWallet()
+  const { publicKey, signTransaction } = usePhantom()
 
   const [status, setStatus]   = useState<TxStatus>('idle')
   const [txHash, setTxHash]   = useState<string | null>(null)
@@ -76,13 +75,22 @@ export function useVaultDeposit(): UseVaultDepositResult {
 
       const { transaction: serialized, blockhash, lastValidBlockHeight } = json.data
       const tx = Transaction.from(Buffer.from(serialized, 'base64'))
+      tx.recentBlockhash = blockhash
+      tx.feePayer = publicKey
 
       setStatus('signing')
-      const sig = await sendTransaction(tx, connection, { skipPreflight: false, maxRetries: 3 })
-      setTxHash(sig)
+      const signedTx = await signTransaction(tx)
 
       setStatus('confirming')
-      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed')
+      const sendResp = await fetch(`${API_BASE}/tx/send-confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction: Buffer.from(signedTx.serialize()).toString('base64') }),
+      })
+      const sendJson = await sendResp.json()
+      if (!sendJson.ok) throw new Error(sendJson.error ?? 'send-confirm failed')
+      const sig: string = sendJson.signature
+      setTxHash(sig)
       setStatus('success')
 
       // Refresh position after success
@@ -91,14 +99,14 @@ export function useVaultDeposit(): UseVaultDepositResult {
       }
     } catch (err: any) {
       console.error('[VaultDeposit]', err)
-      if (err?.message?.includes('User rejected')) {
+      if (err?.message?.includes('User rejected') || err?.message?.includes('rejected')) {
         setStatus('idle')
       } else {
         setError(err?.message ?? 'Transaction failed')
         setStatus('error')
       }
     }
-  }, [publicKey, connection, sendTransaction, refreshPosition])
+  }, [publicKey, signTransaction, refreshPosition])
 
   const deposit = useCallback((asset: string, amountUi: number) =>
     sendTx('/earn/vault/build-deposit', { asset, amount: amountUi }),

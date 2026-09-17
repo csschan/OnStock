@@ -8,10 +8,12 @@ export default async function MarketsPage() {
     <div className="max-w-7xl mx-auto px-4 py-6">
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0F172A', margin: 0 }}>
-          All Tokenized Stocks
+          All Tokenized Assets
         </h1>
         <p style={{ fontSize: 13, color: '#94A3B8', marginTop: 4 }}>
-          {assets.length} stocks · {assets.reduce((n, a) => n + a.tradeableCount, 0)} tradeable routes across all issuers and chains
+          {assets.filter(a => a.type !== 'pre-ipo').length} tokenized stocks &amp; ETFs ·{' '}
+          {assets.filter(a => a.type === 'pre-ipo').length} pre-IPO tokens ·{' '}
+          {assets.reduce((n, a) => n + a.tradeableCount, 0)} tradeable routes
         </p>
       </div>
       {assets.length === 0 ? (

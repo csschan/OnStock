@@ -151,4 +151,17 @@ export const TOKENS: TokenConfig[] = [
   { ticker: 'NFLX',  issuer: 'robinhood', chain: 'robinhood-chain', chainId: 4663, tokenSymbol: 'NFLX',  contractAddress: '0xE0444EF8BF4eD74f74FD73686e2ddF4C1c5591E8', decimals: 18 },
   { ticker: 'CRWV',  issuer: 'robinhood', chain: 'robinhood-chain', chainId: 4663, tokenSymbol: 'CRWV',  contractAddress: '0x5f10A1C971B69e47e059e1dC91901B59b3fB49C3', decimals: 18 },
   { ticker: 'CRCL',  issuer: 'robinhood', chain: 'robinhood-chain', chainId: 4663, tokenSymbol: 'CRCL',  contractAddress: '0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5', decimals: 18 },
+
+  // ─── PreStocks — Solana ───
+  // 来源: prestocks.com/products (2026-09)
+  // SPL tokens, 代表 pre-IPO 公司股权经济暴露
+  { ticker: 'ANTHROPIC',  issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'ANTHROPIC',  contractAddress: 'Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw', decimals: 6 },
+  { ticker: 'OPENAI',     issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'OPENAI',     contractAddress: 'PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF', decimals: 6 },
+  { ticker: 'SPACEX',     issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'SPACEX',     contractAddress: 'PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh', decimals: 6 },
+  { ticker: 'ANDURIL',    issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'ANDURIL',    contractAddress: 'PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB', decimals: 6 },
+  { ticker: 'NEURALINK',  issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'NEURALINK',  contractAddress: 'PrekqLJvJ3qVdXmBGDiexvwUTF4rLFDa6HWS4HJbw9S', decimals: 6 },
+  { ticker: 'FIGUREAI',   issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'FIGUREAI',   contractAddress: 'PreZad18qfPtbxNpMtMuAuX2zVpvkEU8DnJx56faCWd', decimals: 6 },
+  { ticker: 'XAI',        issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'XAI',        contractAddress: 'PreC1KtJ1sBPPqaeeqL6Qb15GTLCYVvyYEwxhdfTwfx', decimals: 6 },
+  { ticker: 'POLYMARKET',  issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'POLYMARKET', contractAddress: 'Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP', decimals: 6 },
+  { ticker: 'KALSHI',     issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'KALSHI',     contractAddress: 'PreLWGkkeqG1s4HEfFZSy9moCrJ7btsHuUtfcCeoRua', decimals: 6 },
 ]
