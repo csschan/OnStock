@@ -164,4 +164,15 @@ export const TOKENS: TokenConfig[] = [
   { ticker: 'XAI',        issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'XAI',        contractAddress: 'PreC1KtJ1sBPPqaeeqL6Qb15GTLCYVvyYEwxhdfTwfx', decimals: 6 },
   { ticker: 'POLYMARKET',  issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'POLYMARKET', contractAddress: 'Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP', decimals: 6 },
   { ticker: 'KALSHI',     issuer: 'prestocks', chain: 'solana', chainId: 0, tokenSymbol: 'KALSHI',     contractAddress: 'PreLWGkkeqG1s4HEfFZSy9moCrJ7btsHuUtfcCeoRua', decimals: 6 },
+
+  // ─── xStocks on X Layer (testnet mock) ───
+  // Deployed via OnStock VaultFactory on X Layer Testnet (chainId 195)
+  { ticker: 'TSLA',  issuer: 'backed', chain: 'xlayer', chainId: 195, tokenSymbol: 'TSLAx',  contractAddress: '0x6C1224ef5D09e4Abbe0fbD8430D633980E4953cf', decimals: 18 },
+  { ticker: 'NVDA',  issuer: 'backed', chain: 'xlayer', chainId: 195, tokenSymbol: 'NVDAx',  contractAddress: '0x750d8B482e2E5E60204520cE266C692d52cEE624', decimals: 18 },
+  { ticker: 'SPY',   issuer: 'backed', chain: 'xlayer', chainId: 195, tokenSymbol: 'SPYx',   contractAddress: '0xa35bEc733819e2d3Bc79d3E46b6281eb3F80B5D3', decimals: 18 },
+  { ticker: 'AAPL',  issuer: 'backed', chain: 'xlayer', chainId: 195, tokenSymbol: 'AAPLx',  contractAddress: '0xc6fAB27302A44Bf0Ab0e945344A64d69c8B1900D', decimals: 18 },
+  { ticker: 'GOOGL', issuer: 'backed', chain: 'xlayer', chainId: 195, tokenSymbol: 'GOOGLx', contractAddress: '0x7Ace8001A1fFbA17692A68234ABEB9293bB821b5', decimals: 18 },
+  { ticker: 'META',  issuer: 'backed', chain: 'xlayer', chainId: 195, tokenSymbol: 'METAx',  contractAddress: '0x9F4666ed2eA3DD644D3ED0db0c8740192Bc28006', decimals: 18 },
+  { ticker: 'COIN',  issuer: 'backed', chain: 'xlayer', chainId: 195, tokenSymbol: 'COINx',  contractAddress: '0x6ade7bc80966ed040D1a7A8dFBCF1177649bB871', decimals: 18 },
+  { ticker: 'MSTR',  issuer: 'backed', chain: 'xlayer', chainId: 195, tokenSymbol: 'MSTRx',  contractAddress: '0x5B4D33f9981D652D07391e4c828a09d6e2a09a25', decimals: 18 },
 ]

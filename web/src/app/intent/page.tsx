@@ -5,8 +5,9 @@ export const metadata = {
   description: 'Describe your investment intent, the system generates optimal execution paths from real-time market signals',
 }
 
-export default function IntentPage({ searchParams }: { searchParams: { asset?: string } }) {
-  const initialAsset = searchParams.asset?.toUpperCase() || 'TSLA'
+export default async function IntentPage({ searchParams }: { searchParams: Promise<{ asset?: string }> }) {
+  const params = await searchParams
+  const initialAsset = params.asset?.toUpperCase() || 'TSLA'
 
   return (
     <div style={{ minHeight: '100vh', background: '#F8FAFC', paddingTop: 32 }}>
@@ -25,7 +26,7 @@ export default function IntentPage({ searchParams }: { searchParams: { asset?: s
           <span style={{ color: '#2563EB' }}>We Find the Optimal Path</span>
         </h1>
         <p style={{ fontSize: 14, color: '#64748B', margin: 0, lineHeight: 1.6 }}>
-          Routes computed in real-time from on-chain premiums, 24h momentum, and protocol APYs —
+          Routes computed in real-time from on-chain premiums, 24h momentum, and protocol APYs across Solana and X Layer —
           same intent, different market state, completely different recommendations.
         </p>
       </div>

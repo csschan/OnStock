@@ -8,6 +8,7 @@
 
 import { getLatestPrices, getPriceHistory } from '../aggregator.js'
 import { fetchAllDefiYields } from '../fetchers/defiYields.js'
+import { XLAYER_CONFIG, XLAYER_AAVE } from '../config/xlayer.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,8 @@ export interface IntentRouterResult {
   momentum24h: number         // 24h price change %
   bestVaultApy: number
   bestKaminoApy: number
+  // X Layer cross-chain info
+  xlayerVaultApy: number
   // Routes (sorted by recommendation score)
   routes: RecommendedRoute[]
   // Summary headline
@@ -615,6 +618,58 @@ function buildRoutes(
     }
   }
 
+  // ── Route 5: X Layer Cross-Chain (Vault vs Aave comparison) ────────────────
+  {
+    const xlayerVaultApyBps = XLAYER_CONFIG.apyBps[xstockSymbol] ?? 0
+    const xlayerVaultApy = xlayerVaultApyBps / 100
+    const xlayerAaveApy = XLAYER_AAVE.supplyApy[xstockSymbol] ?? 0
+
+    if (xlayerVaultApy > 0 || xlayerAaveApy > 0) {
+      // Pick the better X Layer yield
+      const useAave = xlayerAaveApy > xlayerVaultApy
+      const bestXlApy = Math.max(xlayerVaultApy, xlayerAaveApy)
+      const bestXlProtocol = useAave ? 'Aave V3' : 'OnStock Vault'
+      const bestXlAction = useAave ? 'kamino_supply' : 'vault_deposit'
+
+      routes.push({
+        id: 'best_entry',
+        title: `Cross-chain: ${xstockSymbol} on X Layer via ${bestXlProtocol} (${bestXlApy.toFixed(1)}% APY)`,
+        tag: 'max_yield',
+        tagLabel: 'X Layer Vault',
+        steps: [
+          {
+            action: 'buy_spot',
+            protocol: 'Jupiter (Solana)',
+            asset: xstockSymbol,
+            amountUsd,
+            description: `Buy ${xstockSymbol} with $${amountUsd.toLocaleString()} USDC on Solana via Jupiter`,
+            url: `https://jup.ag/swap/USDC-${TICKER_TO_SOLANA_MINT[ticker] ?? xstockSymbol}`,
+          },
+          {
+            action: bestXlAction,
+            protocol: `${bestXlProtocol} (X Layer)`,
+            asset: xstockSymbol,
+            amountUsd,
+            description: useAave
+              ? `Supply ${xstockSymbol} to Aave V3 on X Layer to earn ${xlayerAaveApy.toFixed(2)}% supply APY`
+              : `Deposit into ERC4626 Vault on X Layer to earn ${xlayerVaultApy.toFixed(2)}% APY`,
+            apy: bestXlApy,
+          },
+        ],
+        projectedApy: bestXlApy,
+        totalAmountUsd: amountUsd,
+        reasoning: useAave
+          ? `Aave V3 on X Layer offers ${xlayerAaveApy.toFixed(1)}% supply APY for ${xstockSymbol}, higher than the X Layer Vault (${xlayerVaultApy.toFixed(1)}%). Aave's deep liquidity pool and battle-tested smart contracts make this a reliable yield source on OKX's L2.`
+          : `OnStock Vault on X Layer offers ${xlayerVaultApy.toFixed(1)}% APY for ${xstockSymbol}, higher than Aave (${xlayerAaveApy.toFixed(1)}%). Lower L2 gas costs make frequent compounding more efficient than mainnet.`,
+        warnings: [
+          'Cross-chain execution requires bridging assets from Solana to X Layer',
+          `Alternative: ${useAave ? `OnStock Vault ${xlayerVaultApy.toFixed(1)}% APY` : `Aave V3 ${xlayerAaveApy.toFixed(1)}% APY`} also available on X Layer`,
+        ],
+        confidence: 'medium',
+      })
+    }
+  }
+
   // Sort by recommendation priority (disabled routes go last)
   return routes.sort((a, b) => {
     if (a.disabled && !b.disabled) return 1
@@ -695,6 +750,7 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
       momentum24h,
       bestVaultApy: 0,
       bestKaminoApy: 0,
+      xlayerVaultApy: 0,
       routes,
       marketSummary: `${ticker} mark price ${priceStr}, ${premiumStr}, ${momentumStr} — pre-IPO token, tradeable on Jupiter`,
       generatedAt: new Date().toISOString(),
@@ -719,6 +775,8 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
     oraclePrice,
   )
 
+  const xlayerApyBps = XLAYER_CONFIG.apyBps[xstockSymbol] ?? 0
+
   return {
     asset: ticker,
     xstockSymbol,
@@ -729,6 +787,7 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
     momentum24h,
     bestVaultApy: vaultApy,
     bestKaminoApy: kaminoApy,
+    xlayerVaultApy: xlayerApyBps / 100,
     routes,
     marketSummary: buildMarketSummary(xstockSymbol, premiumPct, momentum24h, oraclePrice),
     generatedAt: new Date().toISOString(),

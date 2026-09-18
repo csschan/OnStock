@@ -2,6 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { router } from './api/routes.js'
+import { xlayerRouter } from './api/xlayerRoutes.js'
 import { runFetchCycle } from './aggregator.js'
 import { buildAssetGraph } from './assets/index.js'
 
@@ -12,6 +13,7 @@ const FETCH_INTERVAL = Number(process.env.FETCH_INTERVAL_MS) || 30_000
 app.use(cors())
 app.use(express.json())
 app.use('/api', router)
+app.use('/api/xlayer', xlayerRouter)
 
 app.listen(PORT, () => {
   console.log(`[Server] Running on http://localhost:${PORT}`)

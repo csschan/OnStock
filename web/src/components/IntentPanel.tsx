@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { usePhantom } from '@/components/PhantomProvider'
 import { useIntentExecute } from '@/hooks/useIntentExecute'
+import { useXLayerExecute } from '@/hooks/useXLayerExecute'
+import { useAccount, useConnect } from 'wagmi'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'
 
@@ -59,7 +61,7 @@ interface RouterResult {
   asset: string; xstockSymbol: string; amountUsd: number
   oraclePrice: number | null; onchainPrice: number | null
   premiumPct: number; momentum24h: number
-  bestVaultApy: number; bestKaminoApy: number
+  bestVaultApy: number; bestKaminoApy: number; xlayerVaultApy?: number
   routes: RecommendedRoute[]; marketSummary: string; generatedAt: string
 }
 
@@ -126,14 +128,19 @@ function StepCard({ step, index }: { step: RouteStep; index: number }) {
 }
 
 const EXEC_STATUS_LABEL: Record<string, string> = {
-  building:          'Building transaction...',
-  requesting_usdc:   'Requesting test USDC...',
-  signing_swap:      'Sign USDC → xStock swap...',
-  confirming_swap:   'Confirming swap...',
-  signing_deposit:   'Sign Vault deposit...',
-  confirming_deposit:'Confirming deposit...',
-  success:           'Execution complete!',
-  error:             'Execution failed',
+  building:            'Building transaction...',
+  requesting_usdc:     'Requesting test USDC...',
+  signing_swap:        'Sign USDC → xStock swap...',
+  confirming_swap:     'Confirming swap...',
+  signing_deposit:     'Sign Vault deposit...',
+  confirming_deposit:  'Confirming deposit...',
+  switching_chain:     'Switching to X Layer...',
+  approving:           'Approve xStock spend...',
+  confirming_approve:  'Confirming approval...',
+  depositing:          'Deposit to X Layer Vault...',
+  confirming_deposit2: 'Confirming vault deposit...',
+  success:             'Execution complete!',
+  error:               'Execution failed',
 }
 
 function RouteCard({ route, isTop, isPreIpo, onExecute, execStatus, execError, execResult }: {
@@ -244,13 +251,19 @@ function RouteCard({ route, isTop, isPreIpo, onExecute, execStatus, execError, e
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {execResult.swapTxHash && (
-                      <a href={`https://solscan.io/tx/${execResult.swapTxHash}?cluster=devnet`} target="_blank" rel="noopener noreferrer"
+                      <a href={execResult.mode === 'xlayer-testnet'
+                        ? `https://www.okx.com/explorer/xlayer-test/tx/${execResult.swapTxHash}`
+                        : `https://solscan.io/tx/${execResult.swapTxHash}?cluster=devnet`}
+                        target="_blank" rel="noopener noreferrer"
                         style={{ fontSize: 11, color: '#2563EB' }}>
-                        Swap tx: {execResult.swapTxHash.slice(0, 12)}... →
+                        {execResult.mode === 'xlayer-testnet' ? 'Mint' : 'Swap'} tx: {execResult.swapTxHash.slice(0, 12)}... →
                       </a>
                     )}
                     {execResult.depositTxHash && (
-                      <a href={`https://solscan.io/tx/${execResult.depositTxHash}?cluster=devnet`} target="_blank" rel="noopener noreferrer"
+                      <a href={execResult.mode === 'xlayer-testnet'
+                        ? `https://www.okx.com/explorer/xlayer-test/tx/${execResult.depositTxHash}`
+                        : `https://solscan.io/tx/${execResult.depositTxHash}?cluster=devnet`}
+                        target="_blank" rel="noopener noreferrer"
                         style={{ fontSize: 11, color: '#0EA5E9' }}>
                         Vault deposit tx: {execResult.depositTxHash.slice(0, 12)}... →
                       </a>
@@ -279,14 +292,16 @@ function RouteCard({ route, isTop, isPreIpo, onExecute, execStatus, execError, e
                     disabled={!!execStatus && execStatus !== 'idle' && execStatus !== 'error'}
                     style={{
                       width: '100%', padding: '13px', borderRadius: 10,
-                      background: isPreIpo
+                      background: route.tagLabel === 'X Layer Vault'
+                        ? 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)'
+                        : isPreIpo
                         ? 'linear-gradient(135deg, #7C3AED 0%, #9945FF 100%)'
                         : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 100%)',
                       color: '#fff', border: 'none', fontSize: 14, fontWeight: 800,
                       cursor: 'pointer', letterSpacing: '0.02em',
                     }}
                   >
-                    {isPreIpo ? 'Execute: Buy Pre-IPO Token →' : 'Execute: Swap + Vault Deposit →'}
+                    {route.tagLabel === 'X Layer Vault' ? 'Execute on X Layer: Approve + Vault Deposit →' : isPreIpo ? 'Execute: Buy Pre-IPO Token →' : 'Execute: Swap + Vault Deposit →'}
                   </button>
                   {execError && (
                     <div style={{ fontSize: 11, color: '#DC2626', marginTop: 6, textAlign: 'center' }}>
@@ -305,6 +320,8 @@ function RouteCard({ route, isTop, isPreIpo, onExecute, execStatus, execError, e
 
 export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: string }) {
   const { connected, publicKey, connect: connectPhantom } = usePhantom()
+  const { address: evmAddress, isConnected: evmConnected } = useAccount()
+  const { connect: connectEvm, connectors } = useConnect()
   const [asset, setAsset] = useState(initialAsset)
   const [amountUsd, setAmountUsd] = useState('1000')
   const [risk, setRisk] = useState<'low' | 'medium' | 'high'>('medium')
@@ -312,7 +329,9 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
   const [result, setResult] = useState<RouterResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { status: execStatus, error: execError, result: execResult, execute, reset: resetExec } = useIntentExecute()
+  const { status: xlExecStatus, error: xlExecError, result: xlExecResult, execute: xlExecute, reset: xlResetExec } = useXLayerExecute()
   const [execRouteId, setExecRouteId] = useState<string | null>(null)
+  const [execChain, setExecChain] = useState<'solana' | 'xlayer'>('solana')
   const [faucetStatus, setFaucetStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [faucetTx, setFaucetTx] = useState<string | null>(null)
 
@@ -533,11 +552,19 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
                 goodWhen="positive"
               />
               <div style={{ textAlign: 'center', background: '#1E293B', borderRadius: 10, padding: '10px 16px', minWidth: 100 }}>
-                <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>Best APY</div>
+                <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>Solana APY</div>
                 <div style={{ fontSize: 18, fontWeight: 800, color: '#14F195', fontFamily: 'monospace' }}>
                   {Math.max(result.bestVaultApy, result.bestKaminoApy).toFixed(2)}%
                 </div>
               </div>
+              {(result.xlayerVaultApy ?? 0) > 0 && (
+                <div style={{ textAlign: 'center', background: '#1E293B', borderRadius: 10, padding: '10px 16px', minWidth: 100 }}>
+                  <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>X Layer APY</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#8B5CF6', fontFamily: 'monospace' }}>
+                    {result.xlayerVaultApy!.toFixed(2)}%
+                  </div>
+                </div>
+              )}
               {result.oraclePrice && (
                 <div style={{ textAlign: 'center', background: '#1E293B', borderRadius: 10, padding: '10px 16px', minWidth: 100 }}>
                   <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>Stock Price</div>
@@ -551,30 +578,53 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
 
           {/* Route Cards */}
           <div style={{ fontSize: 13, fontWeight: 700, color: '#64748B', marginBottom: 10 }}>
-            {result.routes.length} routes · dynamically generated from live market state
+            {result.routes.length} routes · Solana{(result.xlayerVaultApy ?? 0) > 0 ? ' + X Layer' : ''} · dynamically generated
           </div>
           {result.routes.map((route, i) => {
             const isTop = i === 0 && !route.disabled
             const isPreIpo = result.bestVaultApy === 0 && result.bestKaminoApy === 0
+            const isXLayer = route.steps.some(s => s.protocol?.includes('X Layer'))
             const canExecute = !route.disabled && route.steps.some(s => s.action === 'vault_deposit' || s.action === 'buy_spot')
             const isActiveExec = execRouteId === route.id
+
+            const activeStatus = isActiveExec
+              ? (execChain === 'xlayer' ? xlExecStatus : execStatus)
+              : undefined
+            const activeError = isActiveExec
+              ? (execChain === 'xlayer' ? xlExecError : execError)
+              : undefined
+            const activeResult = isActiveExec
+              ? (execChain === 'xlayer' && xlExecResult
+                ? { swapTxHash: xlExecResult.mintTxHash ?? '', depositTxHash: xlExecResult.depositTxHash, xstockOut: xlExecResult.xstockOut, xstockSymbol: xlExecResult.xstockSymbol, mode: 'xlayer-testnet' }
+                : execResult)
+              : undefined
+
             return (
               <RouteCard
-                key={route.id}
+                key={`${route.id}-${i}`}
                 route={route}
                 isTop={isTop}
                 isPreIpo={isPreIpo}
                 onExecute={canExecute
                   ? () => {
-                      if (!connected) { connectPhantom(); return }
-                      setExecRouteId(route.id)
-                      resetExec()
-                      execute(asset, parseFloat(amountUsd))
+                      if (isXLayer) {
+                        if (!evmConnected) { connectors[0] && connectEvm({ connector: connectors[0] }); return }
+                        setExecRouteId(route.id)
+                        setExecChain('xlayer')
+                        xlResetExec()
+                        xlExecute(asset, parseFloat(amountUsd))
+                      } else {
+                        if (!connected) { connectPhantom(); return }
+                        setExecRouteId(route.id)
+                        setExecChain('solana')
+                        resetExec()
+                        execute(asset, parseFloat(amountUsd))
+                      }
                     }
                   : undefined}
-                execStatus={isActiveExec ? execStatus : undefined}
-                execError={isActiveExec ? execError : undefined}
-                execResult={isActiveExec ? execResult : undefined}
+                execStatus={activeStatus}
+                execError={activeError}
+                execResult={activeResult}
               />
             )
           })}

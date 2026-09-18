@@ -1,0 +1,39 @@
+{
+  "pool": "0x753CD589Bf89B1F0086A026261241e51F6202355",
+  "aTokens": {
+    "TSLAx": "0xd26EDB8c686708C903D5448b4e9Bd9Dd72b24344",
+    "NVDAx": "0xf2845F9a9f379c81A639e81166a6b5d22e8e2cd1",
+    "SPYx": "0x8dD2a3FE0Bef660F55c737d909175C1b4a667DC1",
+    "AAPLx": "0x8E7687e9cF58f191866653fe05004FE6eFdB7a1f",
+    "GOOGLx": "0xBb6266feFCfb0829b72d72D9F3fB7C370284Bc99",
+    "METAx": "0xF6d4a3EBC8887Dc5a02f6c97CdB6393D17856d05",
+    "COINx": "0x85De614784D63577E2845714ED5f2dcf5f3225A3",
+    "MSTRx": "0x85A8e1Df477A9826113D6Ed6E65164E49eC65bBF"
+  },
+  "apyConfig": {
+    "TSLAx": {
+      "apyPct": 3.5
+    },
+    "NVDAx": {
+      "apyPct": 3.2
+    },
+    "SPYx": {
+      "apyPct": 2.8
+    },
+    "AAPLx": {
+      "apyPct": 3.5
+    },
+    "GOOGLx": {
+      "apyPct": 3.2
+    },
+    "METAx": {
+      "apyPct": 3.5
+    },
+    "COINx": {
+      "apyPct": 4.8
+    },
+    "MSTRx": {
+      "apyPct": 4.5
+    }
+  }
+}
