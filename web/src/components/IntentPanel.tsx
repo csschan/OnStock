@@ -648,7 +648,7 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
           {result.routes.map((route, i) => {
             const isTop = i === 0 && !route.disabled
             const isPreIpo = result.bestVaultApy === 0 && result.bestKaminoApy === 0
-            const isXLayer = route.steps.some(s => s.protocol?.includes('X Layer'))
+            const isXLayer = route.tagLabel === 'X Layer Vault'
             const canExecute = !route.disabled && route.steps.some(s => s.action === 'vault_deposit' || s.action === 'buy_spot')
             const isActiveExec = execRouteId === route.id
 

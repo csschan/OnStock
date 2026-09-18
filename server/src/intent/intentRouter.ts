@@ -632,7 +632,7 @@ function buildRoutes(
       const bestXlAction = useAave ? 'kamino_supply' : 'vault_deposit'
 
       routes.push({
-        id: 'best_entry',
+        id: 'xlayer_vault',
         title: `Cross-chain: ${xstockSymbol} on X Layer via ${bestXlProtocol} (${bestXlApy.toFixed(1)}% APY)`,
         tag: 'max_yield',
         tagLabel: 'X Layer Vault',
@@ -670,10 +670,19 @@ function buildRoutes(
     }
   }
 
-  // Sort by recommendation priority (disabled routes go last)
+  // Sort by recommendation priority
+  // X Layer routes surface first when APY >= best Solana APY (hackathon showcase)
+  const bestSolanaApy = Math.max(
+    ...routes.filter(r => r.tagLabel !== 'X Layer Vault').map(r => r.projectedApy ?? 0)
+  )
   return routes.sort((a, b) => {
     if (a.disabled && !b.disabled) return 1
     if (!a.disabled && b.disabled) return -1
+    const aIsXLayer = a.tagLabel === 'X Layer Vault'
+    const bIsXLayer = b.tagLabel === 'X Layer Vault'
+    // X Layer goes first when its APY >= best Solana APY
+    if (aIsXLayer && !bIsXLayer && (a.projectedApy ?? 0) >= bestSolanaApy) return -1
+    if (!aIsXLayer && bIsXLayer && (b.projectedApy ?? 0) >= bestSolanaApy) return 1
     return 0
   })
 }
