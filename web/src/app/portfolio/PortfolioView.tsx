@@ -1,13 +1,77 @@
 'use client'
 
 import { useAccount, useReadContracts } from 'wagmi'
-import { erc20Abi, formatUnits } from 'viem'
+import { erc20Abi, formatUnits, parseAbi } from 'viem'
 import { useMemo, useState, useEffect } from 'react'
 import { Wallet, TrendingUp, TrendingDown, ArrowUpRight, Vault } from 'lucide-react'
 import type { FlatInstrument } from '@/lib/api'
 type TrackedInstrument = FlatInstrument
 import BuyFlow from '@/components/BuyFlow'
 import { usePhantom } from '@/components/PhantomProvider'
+
+// X Layer vault addresses + APY
+const XLAYER_VAULTS = [
+  { symbol: 'TSLAx',  name: 'Tesla',         address: '0x5903bfd01B729d37CaA742709Ec1BA036d483931' as `0x${string}`, apyPct: 4.20 },
+  { symbol: 'NVDAx',  name: 'NVIDIA',        address: '0x244ECAc0d3458866d07B1E9e842F2b7dF00520AA' as `0x${string}`, apyPct: 4.20 },
+  { symbol: 'SPYx',   name: 'S&P 500',       address: '0x339B7dC6A641A1F8393724528B56ea50E1d149e4' as `0x${string}`, apyPct: 3.80 },
+  { symbol: 'AAPLx',  name: 'Apple',         address: '0xF2dB6823ae8cc56fa9eDf5D306960147CeB3e1ac' as `0x${string}`, apyPct: 4.20 },
+  { symbol: 'GOOGLx', name: 'Google',        address: '0x5C1e6aC2cB991d2292d9ee01C0D3076aC99267cD' as `0x${string}`, apyPct: 4.20 },
+  { symbol: 'METAx',  name: 'Meta',          address: '0xc0d75D94173bbfD8fe57eBF90011547bE815923D' as `0x${string}`, apyPct: 4.20 },
+  { symbol: 'COINx',  name: 'Coinbase',      address: '0x1CF4212B49E4C966df7A0215d9d5c95086191BEF' as `0x${string}`, apyPct: 5.50 },
+  { symbol: 'MSTRx',  name: 'MicroStrategy', address: '0x8841c470dD56d63D8e37868536fF42ACb4663584' as `0x${string}`, apyPct: 5.50 },
+]
+
+const VAULT_ABI = parseAbi([
+  'function balanceOf(address) view returns (uint256)',
+  'function totalAssets() view returns (uint256)',
+  'function totalSupply() view returns (uint256)',
+])
+
+const XLAYER_CHAIN_ID = 195
+
+interface XLayerVaultPos {
+  symbol: string
+  name: string
+  address: string
+  shares: number
+  nav: number       // assets per share
+  value: number     // shares * nav (in token units)
+  apyPct: number
+}
+
+function useXLayerVaultPositions(evmAddress: `0x${string}` | undefined) {
+  const contracts = useMemo(() => {
+    if (!evmAddress) return []
+    return XLAYER_VAULTS.flatMap(v => [
+      { address: v.address, abi: VAULT_ABI, functionName: 'balanceOf' as const, args: [evmAddress], chainId: XLAYER_CHAIN_ID },
+      { address: v.address, abi: VAULT_ABI, functionName: 'totalAssets' as const, chainId: XLAYER_CHAIN_ID },
+      { address: v.address, abi: VAULT_ABI, functionName: 'totalSupply' as const, chainId: XLAYER_CHAIN_ID },
+    ])
+  }, [evmAddress])
+
+  const { data, isLoading } = useReadContracts({ contracts, query: { enabled: !!evmAddress } })
+
+  const positions: XLayerVaultPos[] = useMemo(() => {
+    if (!data) return []
+    const result: XLayerVaultPos[] = []
+    for (let i = 0; i < XLAYER_VAULTS.length; i++) {
+      const v = XLAYER_VAULTS[i]
+      const base = i * 3
+      const sharesRaw = data[base]?.status === 'success' ? (data[base].result as bigint) : 0n
+      const totalAssetsRaw = data[base + 1]?.status === 'success' ? (data[base + 1].result as bigint) : 0n
+      const totalSupplyRaw = data[base + 2]?.status === 'success' ? (data[base + 2].result as bigint) : 0n
+      const shares = Number(formatUnits(sharesRaw, 18))
+      if (shares < 0.000001) continue
+      const nav = totalSupplyRaw > 0n
+        ? Number(formatUnits(totalAssetsRaw, 18)) / Number(formatUnits(totalSupplyRaw, 18))
+        : 1.0
+      result.push({ symbol: v.symbol, name: v.name, address: v.address, shares, nav, value: shares * nav, apyPct: v.apyPct })
+    }
+    return result
+  }, [data])
+
+  return { positions, isLoading }
+}
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'
 
@@ -70,6 +134,7 @@ export default function PortfolioView({ instruments }: { instruments: TrackedIns
   const { publicKey: solanaPubkey } = usePhantom()
   const solanaWallet = solanaPubkey?.toBase58() ?? null
   const { positions: vaultPositions, loading: vaultLoading } = useVaultPositions(solanaWallet)
+  const { positions: xlayerPositions, isLoading: xlayerLoading } = useXLayerVaultPositions(address)
 
   // Build multicall contracts list — balanceOf(address) for every instrument
   const contracts = useMemo(() => {
@@ -125,6 +190,9 @@ export default function PortfolioView({ instruments }: { instruments: TrackedIns
   }, [holdings])
 
   const totalValueUsd = holdings.reduce((s, h) => s + h.valueUsd, 0)
+  const xlayerVaultTotalValue = xlayerPositions.reduce((s, p) => s + p.value, 0)
+  const solanaVaultTotalValue = vaultPositions.reduce((s, p) => s + p.currentValue, 0)
+  const crossChainNav = totalValueUsd + xlayerVaultTotalValue + solanaVaultTotalValue
 
   if (!isConnected) {
     return (
@@ -141,22 +209,72 @@ export default function PortfolioView({ instruments }: { instruments: TrackedIns
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#0F172A]">Portfolio</h1>
           <p className="text-sm text-[#94A3B8] mt-0.5">
-            {address?.slice(0, 6)}…{address?.slice(-4)} · {holdings.length} positions
+            {address?.slice(0, 6)}…{address?.slice(-4)} · {holdings.length} token positions
           </p>
         </div>
-        {totalValueUsd > 0 && (
-          <div className="text-right">
-            <p className="text-xs text-[#94A3B8] mb-0.5">Total Value</p>
-            <p className="text-2xl font-bold text-[#0F172A] font-price">
-              ${totalValueUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-          </div>
-        )}
       </div>
+
+      {/* Cross-chain NAV summary */}
+      {(crossChainNav > 0 || xlayerPositions.length > 0 || vaultPositions.length > 0) && (
+        <div style={{
+          background: '#0F172A', borderRadius: 16, padding: '16px 20px',
+          marginBottom: 24, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center',
+        }}>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <div style={{ fontSize: 10, color: '#94A3B8', fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>
+              CROSS-CHAIN PORTFOLIO NAV
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#14F195', fontFamily: 'monospace' }}>
+              ${crossChainNav.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            {totalValueUsd > 0 && (
+              <div style={{ background: '#1E293B', borderRadius: 10, padding: '10px 14px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#94A3B8', marginBottom: 2 }}>EVM Holdings</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', fontFamily: 'monospace' }}>
+                  ${totalValueUsd.toFixed(0)}
+                </div>
+              </div>
+            )}
+            {solanaVaultTotalValue > 0 && (
+              <div style={{ background: '#1E293B', borderRadius: 10, padding: '10px 14px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#94A3B8', marginBottom: 2 }}>◎ Solana Vaults</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#14F195', fontFamily: 'monospace' }}>
+                  {solanaVaultTotalValue.toFixed(4)}
+                </div>
+              </div>
+            )}
+            {xlayerVaultTotalValue > 0 && (
+              <div style={{ background: '#1E1B4B', borderRadius: 10, padding: '10px 14px', textAlign: 'center', border: '1px solid #6366F133' }}>
+                <div style={{ fontSize: 10, color: '#A5B4FC', marginBottom: 2 }}>⬡ X Layer Vaults</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#8B5CF6', fontFamily: 'monospace' }}>
+                  {xlayerVaultTotalValue.toFixed(4)}
+                </div>
+              </div>
+            )}
+            {(xlayerPositions.length > 0 || vaultPositions.length > 0) && (
+              <div style={{ background: '#1E293B', borderRadius: 10, padding: '10px 14px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#94A3B8', marginBottom: 2 }}>Est. APY</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#34D399', fontFamily: 'monospace' }}>
+                  {xlayerPositions.length > 0
+                    ? (xlayerPositions.reduce((s, p) => s + p.apyPct * p.value, 0) / (xlayerVaultTotalValue || 1)).toFixed(1)
+                    : '4.2'}%
+                </div>
+              </div>
+            )}
+          </div>
+          {!solanaWallet && (
+            <div style={{ fontSize: 11, color: '#F59E0B', background: '#92400E20', borderRadius: 8, padding: '6px 10px' }}>
+              ⚠ Connect Phantom to include Solana vault positions
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Loading */}
       {isLoading && (
@@ -343,6 +461,76 @@ export default function PortfolioView({ instruments }: { instruments: TrackedIns
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#F0FDF4] text-[#16A34A] hover:bg-[#DCFCE7] transition-colors whitespace-nowrap"
                   >
                     Redeem
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* X Layer Vault Positions */}
+      <div className="mt-8">
+        <div className="flex items-center gap-2 mb-3">
+          <span style={{ color: '#8B5CF6', fontSize: 16 }}>⬡</span>
+          <h2 className="text-base font-semibold text-[#0F172A]">X Layer Vault Positions</h2>
+          <span className="text-xs text-[#94A3B8]">OnStock ERC4626 · OKX L2</span>
+        </div>
+
+        {!address ? (
+          <div className="bg-white border border-[#E2E8F0] rounded-2xl py-10 text-center">
+            <p className="text-sm text-[#94A3B8] mb-3">Connect MetaMask or OKX Wallet to view X Layer vault positions.</p>
+          </div>
+        ) : xlayerLoading ? (
+          <div className="flex items-center gap-2 py-6 text-[#94A3B8]">
+            <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: '#8B5CF6', borderTopColor: 'transparent' }} />
+            <span className="text-sm">Reading X Layer vaults…</span>
+          </div>
+        ) : xlayerPositions.length === 0 ? (
+          <div className="bg-white border border-[#E2E8F0] rounded-2xl py-10 text-center">
+            <p className="text-sm text-[#94A3B8] mb-3">No X Layer vault positions found.</p>
+            <a href="/earn" className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#8B5CF6' }}>
+              Deposit to X Layer Vaults <ArrowUpRight className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {xlayerPositions.map(pos => (
+              <div key={pos.symbol} style={{
+                background: '#fff', border: '1.5px solid #8B5CF633',
+                borderRadius: 16, padding: '16px 20px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+                    background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#fff', fontSize: 10, fontWeight: 800,
+                  }}>{pos.symbol.slice(0, 4)}</div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>{pos.symbol}</div>
+                    <div style={{ fontSize: 11, color: '#94A3B8' }}>
+                      {pos.shares.toFixed(6)} shares · NAV {pos.nav.toFixed(6)} · X Layer
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexShrink: 0 }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>
+                      {pos.value.toFixed(4)} <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 400 }}>{pos.symbol}</span>
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#8B5CF6' }}>
+                      {pos.apyPct.toFixed(2)}% APY
+                    </div>
+                  </div>
+                  <a
+                    href={`https://www.okx.com/explorer/xlayer-test/address/${pos.address}`}
+                    target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 11, fontWeight: 600, padding: '6px 12px', borderRadius: 8, background: '#EEF2FF', color: '#6366F1', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                  >
+                    OKX Explorer →
                   </a>
                 </div>
               </div>
