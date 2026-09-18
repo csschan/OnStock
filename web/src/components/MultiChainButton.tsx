@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { useAccount, useDisconnect, useSwitchChain } from 'wagmi'
+import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import { useSolanaNetwork, type SolanaNetwork } from './SolanaWalletProvider'
 import { usePhantom } from './PhantomProvider'
 
@@ -34,8 +34,25 @@ export default function MultiChainButton() {
 
   // EVM
   const { address: evmAddr, isConnected: evmConnected, chain: evmChain } = useAccount()
+  const { connect: evmConnect, connectors } = useConnect()
   const { disconnect: evmDisconnect } = useDisconnect()
   const { switchChain } = useSwitchChain()
+
+  function connectEvm() {
+    // Prefer window.okxwallet (OKX Wallet) → then any injected that is NOT Phantom
+    // This avoids Phantom hijacking window.ethereum
+    if (typeof window !== 'undefined') {
+      if ((window as any).okxwallet) {
+        const okx = connectors.find(c => c.id === 'okxwallet' || c.name?.toLowerCase().includes('okx'))
+        if (okx) { evmConnect({ connector: okx }); return }
+      }
+      // fallback: injected connector (MetaMask or OKX Wallet)
+      const injectedConnector = connectors.find(c => c.id === 'injected' || c.id === 'metaMask')
+      if (injectedConnector) { evmConnect({ connector: injectedConnector }); return }
+      // last resort
+      if (connectors[0]) evmConnect({ connector: connectors[0] })
+    }
+  }
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -150,10 +167,13 @@ export default function MultiChainButton() {
                   }}>Disconnect</button>
                 </div>
               ) : (
-                <button style={{
-                  fontSize: 10, fontWeight: 700, color: '#fff', background: '#627EEA',
-                  border: 'none', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', opacity: 0.5,
-                }}>Connect EVM</button>
+                <button
+                  onClick={() => { connectEvm(); setOpen(false) }}
+                  style={{
+                    fontSize: 10, fontWeight: 700, color: '#fff', background: '#627EEA',
+                    border: 'none', borderRadius: 6, padding: '3px 10px', cursor: 'pointer',
+                  }}
+                >Connect EVM (MetaMask / OKX)</button>
               )}
             </div>
             {EVM_CHAINS.map(c => {
