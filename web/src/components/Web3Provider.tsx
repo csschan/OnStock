@@ -20,13 +20,20 @@ export const xlayerTestnet = defineChain({
   testnet: true,
 })
 
-// Explicitly use injected connector targeting MetaMask/OKX Wallet EVM provider
-// (avoids Phantom EVM auto-detection which would trigger Solana wallet popup)
+// Use window.okxwallet specifically — avoids Phantom which hijacks window.ethereum
 const wagmiConfig = createConfig({
   chains: [mainnet, xlayerTestnet],
   connectors: [
-    injected({ target: 'metaMask' }),
-    injected({ shimDisconnect: true }),  // fallback: any injected EVM provider (OKX Wallet)
+    injected({
+      target() {
+        return {
+          id: 'okxwallet',
+          name: 'OKX Wallet',
+          provider: typeof window !== 'undefined' ? (window as any).okxwallet : undefined,
+        }
+      },
+    }),
+    injected({ target: 'metaMask' }),  // fallback for MetaMask users without OKX Wallet
   ],
   transports: {
     [mainnet.id]: http(),

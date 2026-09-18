@@ -685,14 +685,10 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
                 isXLayer={isXLayer}
                 evmConnected={evmConnected}
                 onConnectEvm={isXLayer ? () => {
-                  // Prefer OKX Wallet (window.okxwallet) → MetaMask → any injected
-                  // Never use Phantom EVM (it hijacks window.ethereum on Solana pages)
-                  if (typeof window !== 'undefined' && (window as any).okxwallet) {
-                    const okx = connectors.find(c => c.id === 'okxwallet' || c.name?.toLowerCase().includes('okx'))
-                    if (okx) { connectEvm({ connector: okx }); return }
-                  }
-                  const injected = connectors.find(c => c.id === 'injected' || c.id === 'metaMask')
-                  if (injected) { connectEvm({ connector: injected }); return }
+                  const okx = connectors.find(c => c.id === 'okxwallet')
+                  if (okx) { connectEvm({ connector: okx }); return }
+                  const mm = connectors.find(c => c.id === 'metaMask')
+                  if (mm) { connectEvm({ connector: mm }); return }
                   if (connectors[0]) connectEvm({ connector: connectors[0] })
                 } : undefined}
                 onExecute={canExecute

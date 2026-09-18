@@ -17,7 +17,7 @@ const EVM_CHAINS: { id: number; label: string; color: string }[] = [
   { id: 8453,  label: 'Base',            color: '#0052FF' },
   { id: 42161, label: 'Arbitrum',        color: '#28A0F0' },
   { id: 4663,  label: 'Robinhood Chain', color: '#00C805' },
-  { id: 196,   label: 'OKX X Layer',    color: '#000000' },
+  { id: 195,   label: 'X Layer Testnet', color: '#6366F1' },
 ]
 
 function shortAddr(addr: string) {
@@ -39,19 +39,13 @@ export default function MultiChainButton() {
   const { switchChain } = useSwitchChain()
 
   function connectEvm() {
-    // Prefer window.okxwallet (OKX Wallet) → then any injected that is NOT Phantom
-    // This avoids Phantom hijacking window.ethereum
-    if (typeof window !== 'undefined') {
-      if ((window as any).okxwallet) {
-        const okx = connectors.find(c => c.id === 'okxwallet' || c.name?.toLowerCase().includes('okx'))
-        if (okx) { evmConnect({ connector: okx }); return }
-      }
-      // fallback: injected connector (MetaMask or OKX Wallet)
-      const injectedConnector = connectors.find(c => c.id === 'injected' || c.id === 'metaMask')
-      if (injectedConnector) { evmConnect({ connector: injectedConnector }); return }
-      // last resort
-      if (connectors[0]) evmConnect({ connector: connectors[0] })
-    }
+    // Priority: OKX Wallet (window.okxwallet) → MetaMask → any injected
+    // window.okxwallet is separate from window.ethereum, never Phantom
+    const okx = connectors.find(c => c.id === 'okxwallet')
+    if (okx) { evmConnect({ connector: okx }); return }
+    const mm = connectors.find(c => c.id === 'metaMask')
+    if (mm) { evmConnect({ connector: mm }); return }
+    if (connectors[0]) evmConnect({ connector: connectors[0] })
   }
 
   useEffect(() => {
