@@ -633,17 +633,23 @@ function buildRoutes(
 
       routes.push({
         id: 'xlayer_vault',
-        title: `Cross-chain: ${xstockSymbol} on X Layer via ${bestXlProtocol} (${bestXlApy.toFixed(1)}% APY)`,
+        title: `X Layer: ${xstockSymbol} via ${bestXlProtocol} — ${bestXlApy.toFixed(1)}% APY on OKX L2`,
         tag: 'max_yield',
         tagLabel: 'X Layer Vault',
         steps: [
           {
             action: 'buy_spot',
-            protocol: 'Jupiter (Solana)',
+            protocol: 'OnStock (X Layer)',
             asset: xstockSymbol,
             amountUsd,
-            description: `Buy ${xstockSymbol} with $${amountUsd.toLocaleString()} USDC on Solana via Jupiter`,
-            url: `https://jup.ag/swap/USDC-${TICKER_TO_SOLANA_MINT[ticker] ?? xstockSymbol}`,
+            description: `Mint ${xstockSymbol} on X Layer Testnet — server issues xStock to your EVM wallet at oracle price $${oraclePrice?.toFixed(2) ?? '—'}`,
+          },
+          {
+            action: 'buy_spot',
+            protocol: 'MetaMask / OKX Wallet',
+            asset: xstockSymbol,
+            amountUsd,
+            description: `Approve ${xstockSymbol} spend on X Layer (ERC-20 approval — one MetaMask signature)`,
           },
           {
             action: bestXlAction,
@@ -651,21 +657,21 @@ function buildRoutes(
             asset: xstockSymbol,
             amountUsd,
             description: useAave
-              ? `Supply ${xstockSymbol} to Aave V3 on X Layer to earn ${xlayerAaveApy.toFixed(2)}% supply APY`
-              : `Deposit into ERC4626 Vault on X Layer to earn ${xlayerVaultApy.toFixed(2)}% APY`,
+              ? `Supply ${xstockSymbol} to Aave V3 on X Layer — earn ${xlayerAaveApy.toFixed(2)}% supply APY`
+              : `Deposit ${xstockSymbol} into ERC4626 Vault on X Layer — earn ${xlayerVaultApy.toFixed(2)}% APY, receive vault shares`,
             apy: bestXlApy,
           },
         ],
         projectedApy: bestXlApy,
         totalAmountUsd: amountUsd,
         reasoning: useAave
-          ? `Aave V3 on X Layer offers ${xlayerAaveApy.toFixed(1)}% supply APY for ${xstockSymbol}, higher than the X Layer Vault (${xlayerVaultApy.toFixed(1)}%). Aave's deep liquidity pool and battle-tested smart contracts make this a reliable yield source on OKX's L2.`
-          : `OnStock Vault on X Layer offers ${xlayerVaultApy.toFixed(1)}% APY for ${xstockSymbol}, higher than Aave (${xlayerAaveApy.toFixed(1)}%). Lower L2 gas costs make frequent compounding more efficient than mainnet.`,
+          ? `Aave V3 on X Layer offers ${xlayerAaveApy.toFixed(1)}% supply APY for ${xstockSymbol}, higher than OnStock Vault (${xlayerVaultApy.toFixed(1)}%). Entire execution on X Layer (OKX L2) — no Solana bridge needed. Connect MetaMask or OKX Wallet to execute.`
+          : `OnStock Vault on X Layer offers ${xlayerVaultApy.toFixed(1)}% APY for ${xstockSymbol}. Entire execution on X Layer (OKX L2) — no Solana bridge needed. Server mints xStock at oracle price, two wallet signatures: approve + deposit.`,
         warnings: [
-          'Cross-chain execution requires bridging assets from Solana to X Layer',
-          `Alternative: ${useAave ? `OnStock Vault ${xlayerVaultApy.toFixed(1)}% APY` : `Aave V3 ${xlayerAaveApy.toFixed(1)}% APY`} also available on X Layer`,
+          `Requires EVM wallet (MetaMask / OKX Wallet) connected to X Layer Testnet (Chain ID 195)`,
+          `Alternative yield on X Layer: ${useAave ? `OnStock Vault ${xlayerVaultApy.toFixed(1)}% APY` : `Aave V3 ${xlayerAaveApy.toFixed(1)}% APY`}`,
         ],
-        confidence: 'medium',
+        confidence: 'high',
       })
     }
   }
