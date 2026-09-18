@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { fetchEarnOverview, type DefiYield } from '@/lib/api'
 import YieldCardClient from '@/components/YieldCardClient'
+import XLayerVaultsPanel from '@/components/XLayerVaultsPanel'
 
 const TYPE_LABEL: Record<string, string> = {
   lending: 'Lending', cdp: 'CDP / Mint', lp: 'Liquidity Pool', leveraged: 'Leveraged Token',
@@ -110,12 +111,13 @@ export default async function EarnPage({ searchParams }: { searchParams: Promise
             fontSize: 20, color: '#fff',
           }}>◎</div>
           <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0F172A', margin: 0 }}>
-            Earn on Solana xStocks
+            Earn on xStocks
           </h1>
         </div>
         <p style={{ fontSize: 13, color: '#64748B', margin: 0 }}>
-          Supply, mint, or provide liquidity with your tokenized stocks — all executed directly on OnStock.
-          Kamino transactions are signed in-app via Phantom.
+          Supply, mint, or provide liquidity with your tokenized stocks — on{' '}
+          <span style={{ color: '#9945FF', fontWeight: 700 }}>Solana</span> via Phantom, or on{' '}
+          <span style={{ color: '#6366F1', fontWeight: 700 }}>X Layer (OKX L2)</span> via MetaMask / OKX Wallet.
         </p>
       </div>
 
@@ -188,10 +190,16 @@ export default async function EarnPage({ searchParams }: { searchParams: Promise
         </div>
       )}
 
-      {/* Asset sections */}
+      {/* Solana asset sections */}
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#9945FF', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>◎</span> Solana
+      </div>
       {assetOrder.map(([asset, yields]) => (
         <AssetSection key={asset} asset={asset} yields={yields} focusAsset={focusAsset} />
       ))}
+
+      {/* X Layer Vaults */}
+      <XLayerVaultsPanel />
     </div>
   )
 }

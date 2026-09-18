@@ -143,10 +143,12 @@ const EXEC_STATUS_LABEL: Record<string, string> = {
   error:               'Execution failed',
 }
 
-function RouteCard({ route, isTop, isPreIpo, onExecute, execStatus, execError, execResult }: {
+function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onExecute, execStatus, execError, execResult }: {
   route: RecommendedRoute
   isTop: boolean
   isPreIpo?: boolean
+  isXLayer?: boolean
+  evmConnected?: boolean
   onExecute?: () => void
   execStatus?: string
   execError?: string | null
@@ -155,18 +157,28 @@ function RouteCard({ route, isTop, isPreIpo, onExecute, execStatus, execError, e
   const [expanded, setExpanded] = useState(isTop)
   const tagStyle = TAG_STYLE[route.tag] ?? TAG_STYLE.defensive
 
+  const borderColor = isXLayer ? '#8B5CF6' : isTop ? tagStyle.border : '#E2E8F0'
+  const bgColor = isXLayer ? '#F5F3FF' : isTop ? tagStyle.bg : '#fff'
+
   return (
     <div style={{
-      border: `1.5px solid ${isTop ? tagStyle.border : '#E2E8F0'}`,
+      border: `1.5px solid ${borderColor}`,
       borderRadius: 12, padding: '14px 16px', marginBottom: 12,
-      background: isTop ? tagStyle.bg : '#fff',
+      background: bgColor,
       opacity: route.disabled ? 0.6 : 1,
     }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-            {isTop && (
+            {isXLayer && (
+              <span style={{
+                fontSize: 9, fontWeight: 800, color: '#fff',
+                background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
+                borderRadius: 4, padding: '2px 8px', letterSpacing: '0.05em',
+              }}>⬡ X LAYER · OKX L2</span>
+            )}
+            {isTop && !isXLayer && (
               <span style={{
                 fontSize: 9, fontWeight: 800, color: '#fff',
                 background: tagStyle.border, borderRadius: 4, padding: '2px 8px', letterSpacing: '0.05em',
@@ -236,6 +248,21 @@ function RouteCard({ route, isTop, isPreIpo, onExecute, execStatus, execError, e
               Signal confidence: {route.confidence === 'high' ? '🟢 High' : route.confidence === 'medium' ? '🟡 Medium' : '🔴 Low'}
             </span>
           </div>
+
+          {/* X Layer wallet status */}
+          {isXLayer && onExecute && (
+            <div style={{
+              background: evmConnected ? '#EEF2FF' : '#FFF7ED',
+              border: `1px solid ${evmConnected ? '#C7D2FE' : '#FED7AA'}`,
+              borderRadius: 8, padding: '8px 12px', marginBottom: 10,
+              display: 'flex', alignItems: 'center', gap: 8, fontSize: 11,
+            }}>
+              <span>{evmConnected ? '⬡' : '⚠'}</span>
+              <span style={{ color: evmConnected ? '#6366F1' : '#92400E', fontWeight: 600 }}>
+                {evmConnected ? 'EVM wallet connected — ready to execute on X Layer' : 'EVM wallet required — click Execute to connect MetaMask / OKX Wallet'}
+              </span>
+            </div>
+          )}
 
           {/* Execute button — any recommended (top) route that isn't disabled */}
           {onExecute && (
@@ -576,6 +603,44 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
             </div>
           </div>
 
+          {/* Cross-chain comparison banner — shown when X Layer has a route */}
+          {(result.xlayerVaultApy ?? 0) > 0 && (
+            <div style={{
+              background: 'linear-gradient(135deg, #1E1B4B 0%, #312E81 100%)',
+              borderRadius: 12, padding: '14px 18px', marginBottom: 14,
+              color: '#fff',
+            }}>
+              <div style={{ fontSize: 11, color: '#A5B4FC', fontWeight: 700, marginBottom: 8, letterSpacing: '0.05em' }}>
+                ⬡ CROSS-CHAIN YIELD COMPARISON
+              </div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ background: '#ffffff18', borderRadius: 8, padding: '8px 14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: '#A5B4FC', marginBottom: 2 }}>◎ Solana Best</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#14F195', fontFamily: 'monospace' }}>
+                    {Math.max(result.bestVaultApy, result.bestKaminoApy).toFixed(2)}%
+                  </div>
+                  <div style={{ fontSize: 9, color: '#94A3B8', marginTop: 1 }}>
+                    {result.bestVaultApy >= result.bestKaminoApy ? 'OnStock Vault' : 'Kamino'}
+                  </div>
+                </div>
+                <div style={{ fontSize: 20, color: '#6366F1', fontWeight: 800 }}>vs</div>
+                <div style={{ background: '#ffffff18', borderRadius: 8, padding: '8px 14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: '#A5B4FC', marginBottom: 2 }}>⬡ X Layer Best</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#8B5CF6', fontFamily: 'monospace' }}>
+                    {result.xlayerVaultApy!.toFixed(2)}%
+                  </div>
+                  <div style={{ fontSize: 9, color: '#94A3B8', marginTop: 1 }}>OnStock Vault · ERC4626</div>
+                </div>
+                <div style={{ flex: 1, minWidth: 160, fontSize: 12, color: '#C7D2FE', lineHeight: 1.5 }}>
+                  {result.xlayerVaultApy! > Math.max(result.bestVaultApy, result.bestKaminoApy)
+                    ? `X Layer offers higher yield (+${(result.xlayerVaultApy! - Math.max(result.bestVaultApy, result.bestKaminoApy)).toFixed(2)}%) → router recommends cross-chain execution`
+                    : `Solana offers comparable yield → both routes available below`
+                  }
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Route Cards */}
           <div style={{ fontSize: 13, fontWeight: 700, color: '#64748B', marginBottom: 10 }}>
             {result.routes.length} routes · Solana{(result.xlayerVaultApy ?? 0) > 0 ? ' + X Layer' : ''} · dynamically generated
@@ -605,6 +670,8 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
                 route={route}
                 isTop={isTop}
                 isPreIpo={isPreIpo}
+                isXLayer={isXLayer}
+                evmConnected={evmConnected}
                 onExecute={canExecute
                   ? () => {
                       if (isXLayer) {
