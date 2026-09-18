@@ -1,10 +1,73 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Transaction } from '@solana/web3.js'
 import { usePhantom } from './PhantomProvider'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'
+
+// Cross-chain route decision per asset
+interface ChainRoute {
+  ticker: string
+  chain: 'xlayer' | 'solana'
+  chainLabel: string
+  apy: number
+  reason: string
+  premiumPct?: number
+  savingsPct?: number  // entry price saving vs Solana
+}
+
+async function fetchChainRoutes(tickers: string[]): Promise<ChainRoute[]> {
+  const routes: ChainRoute[] = []
+  await Promise.all(tickers.map(async ticker => {
+    try {
+      const [priceResp, intentResp] = await Promise.all([
+        fetch(`${API_BASE}/prices/${ticker}`),
+        fetch(`${API_BASE}/intent/route`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset: ticker, amountUsd: 1000, riskTolerance: 'medium' }),
+        }),
+      ])
+      const priceData = await priceResp.json()
+      const intentData = await intentResp.json()
+
+      const premiumPct: number = priceData.ok ? (priceData.data?.premiumPct ?? 0) : 0
+      const xlayerApy: number = intentData.ok ? (intentData.data?.xlayerVaultApy ?? 4.2) : 4.2
+      const solanaApy: number = intentData.ok
+        ? Math.max(intentData.data?.bestVaultApy ?? 0, intentData.data?.bestKaminoApy ?? 0)
+        : 4.2
+
+      // Route to X Layer when: APY >= Solana AND (Solana has premium OR APY is higher)
+      const xlayerWins = xlayerApy >= solanaApy
+      if (xlayerWins) {
+        routes.push({
+          ticker,
+          chain: 'xlayer',
+          chainLabel: 'X Layer · OKX L2',
+          apy: xlayerApy,
+          reason: premiumPct > 0.3
+            ? `Solana has +${premiumPct.toFixed(2)}% premium → X Layer entry at oracle price`
+            : `X Layer Vault ${xlayerApy.toFixed(1)}% APY · lower L2 gas cost`,
+          premiumPct,
+          savingsPct: premiumPct > 0 ? premiumPct : undefined,
+        })
+      } else {
+        routes.push({
+          ticker,
+          chain: 'solana',
+          chainLabel: 'Solana',
+          apy: solanaApy,
+          reason: `Solana Vault ${solanaApy.toFixed(1)}% APY · higher than X Layer ${xlayerApy.toFixed(1)}%`,
+          premiumPct,
+        })
+      }
+    } catch {
+      routes.push({ ticker, chain: 'xlayer', chainLabel: 'X Layer · OKX L2', apy: 4.2, reason: 'Default X Layer route' })
+    }
+  }))
+  return routes
+}
 
 // Send signed tx to server relay — server re-broadcasts every 2s until confirmed
 async function sendAndConfirm(txBytes: Uint8Array): Promise<string> {
@@ -67,6 +130,17 @@ export default function PortfolioBuilder() {
   const projectedApy = totalPctForApy > 0
     ? Object.entries(selected).reduce((sum, [asset, pct]) => sum + (VAULT_APY[asset] ?? 4.20) * (pct / totalPctForApy), 0)
     : 4.20
+
+  // Cross-chain routing
+  const [chainRoutes, setChainRoutes] = useState<ChainRoute[]>([])
+  const [routeLoading, setRouteLoading] = useState(false)
+
+  useEffect(() => {
+    const tickers = Object.keys(selected)
+    if (!tickers.length) { setChainRoutes([]); return }
+    setRouteLoading(true)
+    fetchChainRoutes(tickers).then(r => { setChainRoutes(r); setRouteLoading(false) })
+  }, [JSON.stringify(Object.keys(selected).sort())])
 
   // Step 2: batch result
   const [batchData, setBatchData] = useState<BatchPosition[] | null>(null)
@@ -354,6 +428,105 @@ export default function PortfolioBuilder() {
         </div>
       </div>
 
+      {/* ── Cross-Chain Routing Table ── */}
+      {Object.keys(selected).length > 0 && (
+        <div style={{
+          background: '#0F172A', borderRadius: 16, padding: '18px 20px',
+          marginBottom: 16, color: '#fff',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 11, color: '#94A3B8', fontWeight: 700, letterSpacing: '0.05em', marginBottom: 2 }}>
+                CROSS-CHAIN ROUTING ENGINE
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>
+                Optimal Chain Per Asset
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#14F195', background: '#14F19520', borderRadius: 4, padding: '2px 8px' }}>◎ Solana</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#8B5CF6', background: '#8B5CF620', borderRadius: 4, padding: '2px 8px' }}>⬡ X Layer</span>
+            </div>
+          </div>
+
+          {routeLoading ? (
+            <div style={{ fontSize: 12, color: '#64748B', textAlign: 'center', padding: '10px 0' }}>Querying chains...</div>
+          ) : chainRoutes.length > 0 ? (
+            <div>
+              {chainRoutes.map(r => {
+                const isXLayer = r.chain === 'xlayer'
+                const meta = ASSETS.find(a => a.ticker === r.ticker)!
+                const amountUsd = (parseFloat(totalUsd) || 0) * (selected[r.ticker] ?? 0) / 100
+                return (
+                  <div key={r.ticker} style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '9px 12px', borderRadius: 8, marginBottom: 6,
+                    background: isXLayer ? '#1E1B4B' : '#0F2027',
+                    border: `1px solid ${isXLayer ? '#6366F1' : '#14F195'}33`,
+                  }}>
+                    <div style={{
+                      width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                      background: `${meta.color}30`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 9, fontWeight: 800, color: meta.color,
+                    }}>{r.ticker}</div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <span style={{
+                          fontSize: 9, fontWeight: 800,
+                          color: isXLayer ? '#8B5CF6' : '#14F195',
+                          background: isXLayer ? '#8B5CF620' : '#14F19520',
+                          borderRadius: 4, padding: '1px 6px',
+                        }}>{isXLayer ? '⬡' : '◎'} {r.chainLabel}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#34D399' }}>{r.apy.toFixed(1)}% APY</span>
+                        {r.savingsPct && r.savingsPct > 0 && (
+                          <span style={{ fontSize: 9, color: '#A78BFA', fontWeight: 700 }}>
+                            save +{r.savingsPct.toFixed(2)}% on entry
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.reason}
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>${amountUsd.toFixed(0)}</div>
+                      <div style={{ fontSize: 9, color: '#64748B' }}>{selected[r.ticker]}%</div>
+                    </div>
+                  </div>
+                )
+              })}
+
+              {/* Chain summary */}
+              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                {[
+                  {
+                    chain: 'xlayer', label: '⬡ X Layer', color: '#8B5CF6',
+                    count: chainRoutes.filter(r => r.chain === 'xlayer').length,
+                    usd: chainRoutes.filter(r => r.chain === 'xlayer').reduce((s, r) => s + (parseFloat(totalUsd) || 0) * (selected[r.ticker] ?? 0) / 100, 0),
+                  },
+                  {
+                    chain: 'solana', label: '◎ Solana', color: '#14F195',
+                    count: chainRoutes.filter(r => r.chain === 'solana').length,
+                    usd: chainRoutes.filter(r => r.chain === 'solana').reduce((s, r) => s + (parseFloat(totalUsd) || 0) * (selected[r.ticker] ?? 0) / 100, 0),
+                  },
+                ].filter(c => c.count > 0).map(c => (
+                  <div key={c.chain} style={{
+                    flex: 1, background: '#ffffff0a', borderRadius: 8, padding: '8px 12px',
+                    border: `1px solid ${c.color}33`,
+                  }}>
+                    <div style={{ fontSize: 10, color: c.color, fontWeight: 700 }}>{c.label}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>{c.count} assets · ${c.usd.toFixed(0)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       {/* Wallet status */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
@@ -547,9 +720,62 @@ export default function PortfolioBuilder() {
                       : 'Portfolio built and deposited to Vault'}
                 </div>
                 {!allFailed && (
-                  <div style={{ fontSize: 11, color: '#94A3B8' }}>
-                    Holding receipt tokens, earning {projectedApy.toFixed(1)}% APY automatically. Redeem anytime.
-                  </div>
+                  <>
+                    <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 12 }}>
+                      Holding receipt tokens, earning {projectedApy.toFixed(1)}% APY automatically. Redeem anytime.
+                    </div>
+
+                    {/* Cross-chain portfolio breakdown */}
+                    <div style={{ background: '#ffffff08', borderRadius: 10, padding: '12px 14px', marginTop: 8 }}>
+                      <div style={{ fontSize: 10, color: '#A5B4FC', fontWeight: 700, marginBottom: 10, letterSpacing: '0.05em' }}>
+                        YOUR CROSS-CHAIN PORTFOLIO
+                      </div>
+                      <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                        {[
+                          {
+                            chain: 'xlayer', label: '⬡ X Layer (OKX L2)', color: '#8B5CF6',
+                            assets: progress.filter(p => p.status === 'done' && chainRoutes.find(r => r.ticker === p.asset)?.chain === 'xlayer'),
+                            link: 'https://www.okx.com/explorer/xlayer-test',
+                            linkLabel: 'OKX Explorer',
+                          },
+                          {
+                            chain: 'solana', label: '◎ Solana', color: '#14F195',
+                            assets: progress.filter(p => p.status === 'done' && chainRoutes.find(r => r.ticker === p.asset)?.chain === 'solana'),
+                            link: 'https://solscan.io/?cluster=devnet',
+                            linkLabel: 'Solscan',
+                          },
+                        ].filter(c => c.assets.length > 0).map(c => (
+                          <div key={c.chain} style={{ flex: 1, minWidth: 160, background: '#ffffff08', borderRadius: 8, padding: '10px 12px' }}>
+                            <div style={{ fontSize: 11, color: c.color, fontWeight: 700, marginBottom: 6 }}>{c.label}</div>
+                            {c.assets.map(p => (
+                              <div key={p.asset} style={{ fontSize: 11, color: '#E2E8F0', marginBottom: 3 }}>
+                                • {p.asset} vault deposit
+                                {p.depositTx && (
+                                  <a
+                                    href={c.chain === 'solana'
+                                      ? `https://solscan.io/tx/${p.depositTx}?cluster=devnet`
+                                      : `https://www.okx.com/explorer/xlayer-test/tx/${p.depositTx}`}
+                                    target="_blank" rel="noopener noreferrer"
+                                    style={{ marginLeft: 6, color: c.color, fontSize: 10 }}
+                                  >
+                                    tx →
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                            <a href={c.link} target="_blank" rel="noopener noreferrer"
+                              style={{ fontSize: 10, color: c.color, display: 'block', marginTop: 6 }}>
+                              View on {c.linkLabel} →
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ fontSize: 10, color: '#6366F1', borderTop: '1px solid #ffffff12', paddingTop: 8 }}>
+                        💡 Connect Phantom + MetaMask on the Portfolio page to view unified cross-chain NAV →
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             )

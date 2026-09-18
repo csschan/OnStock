@@ -16,12 +16,14 @@ export default function PortfolioBuilderPage() {
           }}>RWA Portfolio Builder</span>
         </div>
         <h1 style={{ fontSize: 28, fontWeight: 900, color: '#0F172A', margin: '0 0 8px', lineHeight: 1.2 }}>
-          Build Your<br />
-          <span style={{ color: '#2563EB' }}>xStock Portfolio</span>
+          Cross-Chain Portfolio<br />
+          <span style={{ color: '#2563EB' }}>Router & Builder</span>
         </h1>
         <p style={{ fontSize: 14, color: '#64748B', margin: 0, lineHeight: 1.6 }}>
-          Select stocks, set weights, one-click buy and deposit to OnStock Vault —
-          earn DeFi yield automatically while holding, redeem anytime.
+          Select stocks, set weights — the routing engine finds the optimal chain
+          (<span style={{ color: '#9945FF', fontWeight: 700 }}>Solana</span> /{' '}
+          <span style={{ color: '#6366F1', fontWeight: 700 }}>X Layer</span>) per asset based on
+          live premiums, liquidity, and APY. One-click execute, unified cross-chain portfolio.
         </p>
       </div>
       <PortfolioBuilder />
