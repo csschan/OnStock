@@ -143,12 +143,13 @@ const EXEC_STATUS_LABEL: Record<string, string> = {
   error:               'Execution failed',
 }
 
-function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onExecute, execStatus, execError, execResult }: {
+function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onConnectEvm, onExecute, execStatus, execError, execResult }: {
   route: RecommendedRoute
   isTop: boolean
   isPreIpo?: boolean
   isXLayer?: boolean
   evmConnected?: boolean
+  onConnectEvm?: () => void
   onExecute?: () => void
   execStatus?: string
   execError?: string | null
@@ -250,17 +251,28 @@ function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onExecute, 
           </div>
 
           {/* X Layer wallet status */}
-          {isXLayer && onExecute && (
+          {isXLayer && (
             <div style={{
-              background: evmConnected ? '#EEF2FF' : '#FFF7ED',
-              border: `1px solid ${evmConnected ? '#C7D2FE' : '#FED7AA'}`,
-              borderRadius: 8, padding: '8px 12px', marginBottom: 10,
-              display: 'flex', alignItems: 'center', gap: 8, fontSize: 11,
+              background: evmConnected ? '#EEF2FF' : '#1E1B4B',
+              border: `1px solid ${evmConnected ? '#C7D2FE' : '#6366F1'}`,
+              borderRadius: 8, padding: '10px 14px', marginBottom: 10,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
             }}>
-              <span>{evmConnected ? '⬡' : '⚠'}</span>
-              <span style={{ color: evmConnected ? '#6366F1' : '#92400E', fontWeight: 600 }}>
-                {evmConnected ? 'EVM wallet connected — ready to execute on X Layer' : 'EVM wallet required — click Execute to connect MetaMask / OKX Wallet'}
+              <span style={{ fontSize: 11, color: evmConnected ? '#6366F1' : '#A5B4FC', fontWeight: 600 }}>
+                {evmConnected ? '⬡ EVM wallet connected — ready to execute on X Layer' : '⬡ Connect MetaMask or OKX Wallet to execute on X Layer'}
               </span>
+              {!evmConnected && onConnectEvm && (
+                <button
+                  onClick={onConnectEvm}
+                  style={{
+                    padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                    background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
+                    color: '#fff', border: 'none', cursor: 'pointer', flexShrink: 0,
+                  }}
+                >
+                  Connect EVM Wallet
+                </button>
+              )}
             </div>
           )}
 
@@ -672,10 +684,16 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
                 isPreIpo={isPreIpo}
                 isXLayer={isXLayer}
                 evmConnected={evmConnected}
+                onConnectEvm={isXLayer ? () => {
+                  // Connect MetaMask first (connector[0] = metaMask target), fallback to connector[1]
+                  const metamask = connectors.find(c => c.id === 'metaMask' || c.name?.toLowerCase().includes('metamask'))
+                  const target = metamask ?? connectors[0]
+                  if (target) connectEvm({ connector: target })
+                } : undefined}
                 onExecute={canExecute
                   ? () => {
                       if (isXLayer) {
-                        if (!evmConnected) { connectors[0] && connectEvm({ connector: connectors[0] }); return }
+                        if (!evmConnected) return  // button is hidden when not connected — handled by onConnectEvm
                         setExecRouteId(route.id)
                         setExecChain('xlayer')
                         xlResetExec()

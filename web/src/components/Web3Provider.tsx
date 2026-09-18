@@ -1,6 +1,7 @@
 'use client'
 
 import { WagmiProvider, createConfig, http } from 'wagmi'
+import { injected } from 'wagmi/connectors'
 import { mainnet } from 'wagmi/chains'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { defineChain } from 'viem'
@@ -19,8 +20,14 @@ export const xlayerTestnet = defineChain({
   testnet: true,
 })
 
+// Explicitly use injected connector targeting MetaMask/OKX Wallet EVM provider
+// (avoids Phantom EVM auto-detection which would trigger Solana wallet popup)
 const wagmiConfig = createConfig({
   chains: [mainnet, xlayerTestnet],
+  connectors: [
+    injected({ target: 'metaMask' }),
+    injected({ shimDisconnect: true }),  // fallback: any injected EVM provider (OKX Wallet)
+  ],
   transports: {
     [mainnet.id]: http(),
     [xlayerTestnet.id]: http('https://testrpc.xlayer.tech'),
