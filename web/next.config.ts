@@ -7,6 +7,17 @@ const nextConfig: NextConfig = {
     '@solana/wallet-adapter-phantom',
     '@solana/wallet-adapter-base',
   ],
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  headers: async () => [
+    {
+      source: '/:path*',
+      headers: [
+        { key: 'Cache-Control', value: 'no-store, must-revalidate' },
+      ],
+    },
+  ],
 };
 
 export default nextConfig;

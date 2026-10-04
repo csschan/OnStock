@@ -1,0 +1,28 @@
+{
+  "usdcMint": "3T6BkQkzUociG46BfW4SSurjKt5Dq5rDAiVbaxjMDjsr",
+  "gateway": "EhortXG8Z5DW5U2VFsByQazKwhqf7qjcc4t1Ud2XmK3o",
+  "gatewayBump": 251,
+  "osTokens": {
+    "TSLA": "3ttWHBT4j3KM275mtmhbprukVwKbdJvo35ZnT5Boktbo",
+    "NVDA": "2tjLrVNoAyPHvNFgd3mAAUArD2LRWH5Mb5ysXTEm1xRa",
+    "AAPL": "AHwpHGoXBaAVka8CTPJ2WpKGrsdewktZ8fWe3eEfyqrV",
+    "SPY": "6HxQfoAq1YHP74HGGnVqQtmAYxsEs4fqbjwJXbkxEKHB",
+    "GOOGL": "8bpeW3PjdQGavNvsN8RMuGyRSqNykR1MUF5wBdNtA29X",
+    "META": "JAHJEXF8WxGQXQCzB7EmiUAtq5NBhiDRfQgPXb8pALwd",
+    "COIN": "4g7VSDZ39WRRrJtxqeFk2z1qGMM9Nt7obzhb2YGCn48v",
+    "MSTR": "CLgSPx6VdFb7CMSdY9Sx1i4k3VufRTasiX5u1JssGtAH"
+  },
+  "programId": "76R7gyAYTFTnKPW3ePx44KTm1AQgRRqQopxTpGxpSy6G",
+  "deployer": "8TcQfQY12sMweH9EkvrrXbcgSeB5KGLTUPA4Jmixpm74",
+  "network": "devnet",
+  "bridgeOsTokens": {
+    "TSLA": "EfQATPjQGiMyh2bmTUESaaDDFyDkAzt3bwn6izMNkxwh",
+    "NVDA": "8ptr3rk8BXTwbsiub2tj8GEGzzAHf3TvsPAFFq2P9iDy",
+    "AAPL": "6BLFrpshXyCvkjE1rHyqcpo1D5Zuz1xoBnnc53mr2KeR",
+    "SPY": "7qz7Lbptp7W9ivpx7dgvy7b7sEsdw2Pu2CGwr4h4MecY",
+    "GOOGL": "5GpuG23Dti99BiGu5cEk1G9he7hrV9xwjduGs3z7mKyG",
+    "META": "5giJxRoHLhQ6ySfupEcRBKCGL4fHoFg6kobCeKJGNmDZ",
+    "COIN": "FQL2piMYPrTwTgZJW2ugbQmzCqXejr6wEHqo1d76pH1a",
+    "MSTR": "HNDr6bGuCLqJpaBNWKEpJjDwfNdeHsAfBzrJSLdcRDqe"
+  }
+}

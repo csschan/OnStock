@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Widget } from '@kyberswap/widgets'
 import { useAccount } from 'wagmi'
-import { USDC_BY_CHAIN, KYBER_SUPPORTED_CHAINS } from '@/lib/web3'
+import { USDC_BY_CHAIN, KYBER_SUPPORTED_CHAINS } from '@/lib/chains'
 import RobinhoodSwapWidget from './RobinhoodSwapWidget'
 import DirectSwapWidget from './DirectSwapWidget'
 

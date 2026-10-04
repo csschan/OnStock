@@ -24,6 +24,7 @@ interface DexScreenerPair {
   baseToken: { address: string; symbol: string }
   quoteToken: { symbol: string }
   volume?: { h24: number }
+  pairCreatedAt?: number  // Unix ms timestamp of pool creation
 }
 
 export async function fetchDexScreenerPrice(

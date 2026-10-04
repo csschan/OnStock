@@ -7,12 +7,15 @@ skip-lint = false
 
 [programs.localnet]
 onstock_vault = "Dp5XeudXm3dfSNnLLC6M8dPhDXd6nFmMX9SGNCTtGmKx"
+os_gateway = "76R7gyAYTFTnKPW3ePx44KTm1AQgRRqQopxTpGxpSy6G"
 
 [programs.devnet]
 onstock_vault = "Dp5XeudXm3dfSNnLLC6M8dPhDXd6nFmMX9SGNCTtGmKx"
+os_gateway = "76R7gyAYTFTnKPW3ePx44KTm1AQgRRqQopxTpGxpSy6G"
 
 [programs.testnet]
 onstock_vault = "Dp5XeudXm3dfSNnLLC6M8dPhDXd6nFmMX9SGNCTtGmKx"
+os_gateway = "76R7gyAYTFTnKPW3ePx44KTm1AQgRRqQopxTpGxpSy6G"
 
 [registry]
 url = "https://api.apr.dev"

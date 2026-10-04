@@ -51,17 +51,49 @@ interface RouteStep {
   action: string; protocol: string; asset: string; amountUsd: number
   description: string; apy?: number; leverage?: string; url?: string
 }
+interface RwaRouteScore {
+  overall: number
+  dimensions: {
+    liquidityScore: number; slippageScore: number; deviationScore: number
+    freshnessScore: number; issuerTrustScore: number
+  }
+  deviationPct: number
+  deviationCategory: 'normal' | 'elevated' | 'high'
+}
+interface NetValueProjection {
+  chain: string; entryPremiumPct: number; estimatedSlippagePct: number
+  gasCostUsd: number; effectiveEntryUsd: number; projectedYieldUsd: number
+  netValueUsd: number; breakEvenDays: number | null; holdingDays: number
+}
 interface RecommendedRoute {
   id: string; title: string; tag: string; tagLabel: string
   steps: RouteStep[]; projectedApy: number | null; totalAmountUsd: number
   reasoning: string; warnings: string[]; confidence: string
   disabled?: boolean; disabledReason?: string
+  rwaScore?: RwaRouteScore
+  netValue?: NetValueProjection
+}
+interface FreshnessResult {
+  freshnessScore: number; navAgeSeconds: number; navAgeLabel: string
+  marketStatus: { isOpen: boolean; status: string; reason: string; closedSinceHours: number }
+  gapRiskLevel: string; gapRiskLabel: string
+}
+interface IssuerProfile {
+  id: string; name: string; verified: boolean; regulatedEntity: boolean
+  custodian: string; auditFrequency: string; navSource: string
+  warningFlags: string[]; trustScore: number
+}
+interface PoolHealth {
+  tvlCategory: string; tvlUsd: number; healthScore: number; warningFlags: string[]
 }
 interface RouterResult {
   asset: string; xstockSymbol: string; amountUsd: number
   oraclePrice: number | null; onchainPrice: number | null
   premiumPct: number; momentum24h: number
   bestVaultApy: number; bestKaminoApy: number; xlayerVaultApy?: number
+  freshness?: FreshnessResult; issuerProfile?: IssuerProfile; poolHealth?: PoolHealth
+  marketStatus?: { isOpen: boolean; status: string; reason: string }
+  holdingDays?: number; bestNetValueChain?: string
   routes: RecommendedRoute[]; marketSummary: string; generatedAt: string
 }
 
@@ -193,11 +225,24 @@ function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onConnectEv
             <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{route.title}</span>
           </div>
 
-          {route.projectedApy !== null && (
-            <div style={{ fontSize: 13, color: '#16A34A', fontWeight: 700 }}>
-              Est. APY: {route.projectedApy.toFixed(2)}%
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {route.projectedApy !== null && (
+              <div style={{ fontSize: 13, color: '#16A34A', fontWeight: 700 }}>
+                Est. APY: {route.projectedApy.toFixed(2)}%
+              </div>
+            )}
+            {route.rwaScore && (
+              <div style={{
+                fontSize: 11, fontWeight: 800, fontFamily: 'monospace',
+                color: route.rwaScore.overall >= 80 ? '#16A34A' : route.rwaScore.overall >= 50 ? '#D97706' : '#DC2626',
+                background: route.rwaScore.overall >= 80 ? '#F0FDF4' : route.rwaScore.overall >= 50 ? '#FFFBEB' : '#FEF2F2',
+                borderRadius: 6, padding: '2px 8px',
+                border: `1px solid ${route.rwaScore.overall >= 80 ? '#86EFAC' : route.rwaScore.overall >= 50 ? '#FDE68A' : '#FECACA'}`,
+              }}>
+                RWA Score: {route.rwaScore.overall}
+              </div>
+            )}
+          </div>
           {route.disabled && route.disabledReason && (
             <div style={{ fontSize: 11, color: '#DC2626', marginTop: 2 }}>{route.disabledReason}</div>
           )}
@@ -229,6 +274,103 @@ function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onConnectEv
             {route.steps.map((step, i) => <StepCard key={i} step={step} index={i} />)}
           </div>
 
+          {/* RWA Score Breakdown */}
+          {route.rwaScore && (
+            <div style={{
+              background: '#0F172A', borderRadius: 8, padding: '10px 14px',
+              marginBottom: 8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.05em' }}>
+                  RWA QUALITY SCORE
+                </span>
+                <span style={{
+                  fontSize: 14, fontWeight: 800, fontFamily: 'monospace',
+                  color: route.rwaScore.overall >= 80 ? '#14F195' : route.rwaScore.overall >= 50 ? '#FCD34D' : '#FCA5A5',
+                }}>
+                  {route.rwaScore.overall}/100
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {[
+                  { label: 'Liquidity', val: route.rwaScore.dimensions.liquidityScore, icon: '💧' },
+                  { label: 'Slippage', val: route.rwaScore.dimensions.slippageScore, icon: '📊' },
+                  { label: 'NAV Dev.', val: route.rwaScore.dimensions.deviationScore, icon: '📐' },
+                  { label: 'Freshness', val: route.rwaScore.dimensions.freshnessScore, icon: '⏱' },
+                  { label: 'Issuer', val: route.rwaScore.dimensions.issuerTrustScore, icon: '🏛' },
+                ].map(d => (
+                  <div key={d.label} style={{
+                    flex: 1, minWidth: 80, textAlign: 'center',
+                    background: '#1E293B', borderRadius: 6, padding: '6px 4px',
+                  }}>
+                    <div style={{ fontSize: 9, color: '#64748B', marginBottom: 2 }}>{d.label}</div>
+                    <div style={{
+                      fontSize: 14, fontWeight: 800, fontFamily: 'monospace',
+                      color: d.val >= 0.8 ? '#14F195' : d.val >= 0.5 ? '#FCD34D' : '#FCA5A5',
+                    }}>
+                      {(d.val * 100).toFixed(0)}
+                    </div>
+                    {/* Mini bar */}
+                    <div style={{ height: 3, background: '#334155', borderRadius: 2, marginTop: 3 }}>
+                      <div style={{
+                        height: '100%', borderRadius: 2, width: `${d.val * 100}%`,
+                        background: d.val >= 0.8 ? '#14F195' : d.val >= 0.5 ? '#FCD34D' : '#FCA5A5',
+                      }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {route.rwaScore.deviationCategory !== 'normal' && (
+                <div style={{
+                  marginTop: 6, fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+                  display: 'inline-block',
+                  background: route.rwaScore.deviationCategory === 'high' ? '#7F1D1D' : '#78350F',
+                  color: route.rwaScore.deviationCategory === 'high' ? '#FCA5A5' : '#FCD34D',
+                }}>
+                  NAV-DEX Deviation: {route.rwaScore.deviationPct.toFixed(2)}% ({route.rwaScore.deviationCategory})
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Net Value Projection */}
+          {route.netValue && (
+            <div style={{
+              background: '#0F172A', borderRadius: 8, padding: '10px 14px',
+              marginBottom: 8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.05em' }}>
+                  NET VALUE PROJECTION · {route.netValue.holdingDays}d hold
+                </span>
+                <span style={{ fontSize: 16, fontWeight: 800, fontFamily: 'monospace', color: '#14F195' }}>
+                  ${route.netValue.netValueUsd.toLocaleString()}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {[
+                  { label: 'Entry Cost', val: `${(route.netValue.entryPremiumPct + route.netValue.estimatedSlippagePct).toFixed(2)}%`, color: route.netValue.entryPremiumPct > 0 ? '#FCD34D' : '#14F195' },
+                  { label: 'Effective In', val: `$${route.netValue.effectiveEntryUsd.toLocaleString()}`, color: '#fff' },
+                  { label: `Yield (${route.netValue.holdingDays}d)`, val: `+$${route.netValue.projectedYieldUsd.toFixed(2)}`, color: '#14F195' },
+                  { label: 'Gas', val: `$${route.netValue.gasCostUsd.toFixed(2)}`, color: '#94A3B8' },
+                ].map(d => (
+                  <div key={d.label} style={{ flex: 1, minWidth: 70, textAlign: 'center', background: '#1E293B', borderRadius: 6, padding: '5px 4px' }}>
+                    <div style={{ fontSize: 9, color: '#64748B', marginBottom: 2 }}>{d.label}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, fontFamily: 'monospace', color: d.color }}>{d.val}</div>
+                  </div>
+                ))}
+              </div>
+              {route.netValue.breakEvenDays != null && route.netValue.breakEvenDays > 0 && (
+                <div style={{ marginTop: 6, fontSize: 10, color: '#FCD34D' }}>
+                  Entry premium recovery: ~{route.netValue.breakEvenDays} days to break even via yield
+                </div>
+              )}
+              <div style={{ marginTop: 4, fontSize: 9, color: '#64748B' }}>
+                Chain: {route.netValue.chain} · Net = Entry − Costs + Yield − Gas
+              </div>
+            </div>
+          )}
+
           {/* Warnings */}
           {route.warnings.length > 0 && (
             <div style={{
@@ -259,7 +401,7 @@ function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onConnectEv
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
             }}>
               <span style={{ fontSize: 11, color: evmConnected ? '#6366F1' : '#A5B4FC', fontWeight: 600 }}>
-                {evmConnected ? '⬡ EVM wallet connected — ready to execute on X Layer' : '⬡ Connect MetaMask or OKX Wallet to execute on X Layer'}
+                {evmConnected ? `⬡ EVM wallet connected — ready to execute on ${route.tagLabel === 'Arbitrum Vault' ? 'Arbitrum' : 'X Layer'}` : `⬡ Connect EVM Wallet to execute on ${route.tagLabel === 'Arbitrum Vault' ? 'Arbitrum' : 'X Layer'}`}
               </span>
               {!evmConnected && onConnectEvm && (
                 <button
@@ -289,24 +431,34 @@ function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onConnectEv
                     {execResult.depositTxHash ? ', deposited to Vault' : ' (held in wallet)'}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {execResult.swapTxHash && (
-                      <a href={execResult.mode === 'xlayer-testnet'
+                    {execResult.swapTxHash && (() => {
+                      const explorerUrl = execResult.mode === 'arbitrum-testnet'
+                        ? `https://sepolia.arbiscan.io/tx/${execResult.swapTxHash}`
+                        : execResult.mode === 'xlayer-testnet'
                         ? `https://www.okx.com/explorer/xlayer-test/tx/${execResult.swapTxHash}`
-                        : `https://solscan.io/tx/${execResult.swapTxHash}?cluster=devnet`}
+                        : `https://solscan.io/tx/${execResult.swapTxHash}?cluster=devnet`
+                      return (
+                      <a href={explorerUrl}
                         target="_blank" rel="noopener noreferrer"
                         style={{ fontSize: 11, color: '#2563EB' }}>
-                        {execResult.mode === 'xlayer-testnet' ? 'Mint' : 'Swap'} tx: {execResult.swapTxHash.slice(0, 12)}... →
+                        {execResult.mode?.includes('testnet') ? 'Mint' : 'Swap'} tx: {execResult.swapTxHash.slice(0, 12)}... →
                       </a>
-                    )}
-                    {execResult.depositTxHash && (
-                      <a href={execResult.mode === 'xlayer-testnet'
+                      )
+                    })()}
+                    {execResult.depositTxHash && (() => {
+                      const explorerUrl = execResult.mode === 'arbitrum-testnet'
+                        ? `https://sepolia.arbiscan.io/tx/${execResult.depositTxHash}`
+                        : execResult.mode === 'xlayer-testnet'
                         ? `https://www.okx.com/explorer/xlayer-test/tx/${execResult.depositTxHash}`
-                        : `https://solscan.io/tx/${execResult.depositTxHash}?cluster=devnet`}
+                        : `https://solscan.io/tx/${execResult.depositTxHash}?cluster=devnet`
+                      return (
+                      <a href={explorerUrl}
                         target="_blank" rel="noopener noreferrer"
                         style={{ fontSize: 11, color: '#0EA5E9' }}>
                         Vault deposit tx: {execResult.depositTxHash.slice(0, 12)}... →
                       </a>
-                    )}
+                      )
+                    })()}
                   </div>
                 </div>
               ) : execStatus && execStatus !== 'idle' && execStatus !== 'error' ? (
@@ -340,7 +492,7 @@ function RouteCard({ route, isTop, isPreIpo, isXLayer, evmConnected, onConnectEv
                       cursor: 'pointer', letterSpacing: '0.02em',
                     }}
                   >
-                    {route.tagLabel === 'X Layer Vault' ? 'Execute on X Layer: Approve + Vault Deposit →' : isPreIpo ? 'Execute: Buy Pre-IPO Token →' : 'Execute: Swap + Vault Deposit →'}
+                    {route.tagLabel === 'X Layer Vault' ? 'Execute on X Layer: Approve + Vault Deposit →' : route.tagLabel === 'Arbitrum Vault' ? 'Execute on Arbitrum: Approve + Vault Deposit →' : isPreIpo ? 'Execute: Buy Pre-IPO Token →' : 'Execute: Swap + Vault Deposit →'}
                   </button>
                   {execError && (
                     <div style={{ fontSize: 11, color: '#DC2626', marginTop: 6, textAlign: 'center' }}>
@@ -364,6 +516,7 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
   const [asset, setAsset] = useState(initialAsset)
   const [amountUsd, setAmountUsd] = useState('1000')
   const [risk, setRisk] = useState<'low' | 'medium' | 'high'>('medium')
+  const [holdingDays, setHoldingDays] = useState(30)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<RouterResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -402,7 +555,7 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
       const resp = await fetch(`${API_BASE}/intent/route`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset, amountUsd: parseFloat(amountUsd), riskTolerance: risk }),
+        body: JSON.stringify({ asset, amountUsd: parseFloat(amountUsd), riskTolerance: risk, holdingDays }),
       })
       const json = await resp.json()
       if (!json.ok) throw new Error(json.error)
@@ -425,7 +578,7 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
           DEFINE YOUR INTENT
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.8fr 1fr', gap: 10, marginBottom: 16 }}>
           {/* Asset */}
           <div>
             <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>Asset</div>
@@ -504,6 +657,22 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
                 >
                   {r === 'low' ? 'Low' : r === 'medium' ? 'Med' : 'High'}
                 </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Holding Period */}
+          <div>
+            <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>Holding Period</div>
+            <div style={{ display: 'flex', gap: 3 }}>
+              {[7, 30, 90].map(d => (
+                <button key={d} onClick={() => setHoldingDays(d)} style={{
+                  flex: 1, padding: '9px 2px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                  border: '1px solid', cursor: 'pointer',
+                  borderColor: holdingDays === d ? '#2563EB' : '#E2E8F0',
+                  background: holdingDays === d ? '#EFF6FF' : '#F8FAFC',
+                  color: holdingDays === d ? '#2563EB' : '#94A3B8',
+                }}>{d}d</button>
               ))}
             </div>
           </div>
@@ -615,6 +784,117 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
             </div>
           </div>
 
+          {/* RWA Risk Context Panel */}
+          {result.freshness && result.issuerProfile && result.poolHealth && (
+            <div style={{
+              background: '#fff', border: '1px solid #E2E8F0', borderRadius: 14,
+              padding: '14px 18px', marginBottom: 16,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.05em', marginBottom: 10 }}>
+                RWA RISK CONTEXT — dimensions unique to tokenized securities
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                {/* Market / Freshness */}
+                <div style={{
+                  borderRadius: 10, padding: '10px 12px',
+                  background: result.freshness.marketStatus.isOpen ? '#F0FDF4' : '#FFFBEB',
+                  border: `1px solid ${result.freshness.marketStatus.isOpen ? '#86EFAC' : '#FDE68A'}`,
+                }}>
+                  <div style={{ fontSize: 10, color: '#94A3B8', marginBottom: 4 }}>Market Status</div>
+                  <div style={{
+                    fontSize: 14, fontWeight: 800,
+                    color: result.freshness.marketStatus.isOpen ? '#16A34A' : '#D97706',
+                  }}>
+                    {result.freshness.marketStatus.isOpen ? 'OPEN' : result.freshness.marketStatus.status.toUpperCase()}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#64748B', marginTop: 2 }}>
+                    NAV: {result.freshness.navAgeLabel}
+                  </div>
+                  <div style={{
+                    marginTop: 4, fontSize: 10, fontWeight: 700,
+                    color: result.freshness.gapRiskLevel === 'none' ? '#16A34A'
+                      : result.freshness.gapRiskLevel === 'low' ? '#D97706'
+                      : '#DC2626',
+                  }}>
+                    Gap risk: {result.freshness.gapRiskLevel}
+                  </div>
+                  {/* Freshness bar */}
+                  <div style={{ height: 4, background: '#E2E8F0', borderRadius: 2, marginTop: 6 }}>
+                    <div style={{
+                      height: '100%', borderRadius: 2,
+                      width: `${result.freshness.freshnessScore * 100}%`,
+                      background: result.freshness.freshnessScore >= 0.7 ? '#16A34A'
+                        : result.freshness.freshnessScore >= 0.4 ? '#D97706' : '#DC2626',
+                    }} />
+                  </div>
+                  <div style={{ fontSize: 9, color: '#94A3B8', marginTop: 2 }}>
+                    Freshness: {(result.freshness.freshnessScore * 100).toFixed(0)}%
+                  </div>
+                </div>
+
+                {/* Issuer */}
+                <div style={{
+                  borderRadius: 10, padding: '10px 12px',
+                  background: result.issuerProfile.verified ? '#F0FDF4' : '#FEF2F2',
+                  border: `1px solid ${result.issuerProfile.verified ? '#86EFAC' : '#FECACA'}`,
+                }}>
+                  <div style={{ fontSize: 10, color: '#94A3B8', marginBottom: 4 }}>Issuer</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#0F172A' }}>
+                    {result.issuerProfile.name}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                    {result.issuerProfile.verified && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#16A34A', background: '#DCFCE7', borderRadius: 4, padding: '1px 5px' }}>Verified</span>
+                    )}
+                    {result.issuerProfile.regulatedEntity && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#2563EB', background: '#DBEAFE', borderRadius: 4, padding: '1px 5px' }}>Regulated</span>
+                    )}
+                    <span style={{ fontSize: 9, fontWeight: 700, color: '#64748B', background: '#F1F5F9', borderRadius: 4, padding: '1px 5px' }}>
+                      Audit: {result.issuerProfile.auditFrequency}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 9, color: '#64748B', marginTop: 4 }}>
+                    Custodian: {result.issuerProfile.custodian}
+                  </div>
+                  <div style={{ fontSize: 9, color: '#64748B', marginTop: 1 }}>
+                    Trust: {(result.issuerProfile.trustScore * 100).toFixed(0)}/100
+                  </div>
+                </div>
+
+                {/* Pool Health */}
+                <div style={{
+                  borderRadius: 10, padding: '10px 12px',
+                  background: result.poolHealth.tvlCategory === 'deep' ? '#F0FDF4'
+                    : result.poolHealth.tvlCategory === 'moderate' ? '#FFFBEB' : '#FEF2F2',
+                  border: `1px solid ${result.poolHealth.tvlCategory === 'deep' ? '#86EFAC'
+                    : result.poolHealth.tvlCategory === 'moderate' ? '#FDE68A' : '#FECACA'}`,
+                }}>
+                  <div style={{ fontSize: 10, color: '#94A3B8', marginBottom: 4 }}>Pool Health</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#0F172A' }}>
+                    ${(result.poolHealth.tvlUsd / 1000).toFixed(0)}K TVL
+                  </div>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, marginTop: 2,
+                    color: result.poolHealth.tvlCategory === 'deep' ? '#16A34A'
+                      : result.poolHealth.tvlCategory === 'moderate' ? '#D97706' : '#DC2626',
+                  }}>
+                    {result.poolHealth.tvlCategory.toUpperCase()} liquidity
+                  </div>
+                  {result.poolHealth.warningFlags.length > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      {result.poolHealth.warningFlags.slice(0, 2).map((w, i) => (
+                        <div key={i} style={{ fontSize: 9, color: '#92400E', marginTop: 2 }}>{w}</div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 9, color: '#64748B', marginTop: 4 }}>
+                    Health: {(result.poolHealth.healthScore * 100).toFixed(0)}/100
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Cross-chain comparison banner — shown when X Layer has a route */}
           {(result.xlayerVaultApy ?? 0) > 0 && (
             <div style={{
@@ -660,7 +940,7 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
           {result.routes.map((route, i) => {
             const isTop = i === 0 && !route.disabled
             const isPreIpo = result.bestVaultApy === 0 && result.bestKaminoApy === 0
-            const isXLayer = route.tagLabel === 'X Layer Vault'
+            const isXLayer = route.tagLabel === 'X Layer Vault' || route.tagLabel === 'Arbitrum Vault'
             const canExecute = !route.disabled && route.steps.some(s => s.action === 'vault_deposit' || s.action === 'buy_spot')
             const isActiveExec = execRouteId === route.id
 
@@ -672,7 +952,7 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
               : undefined
             const activeResult = isActiveExec
               ? (execChain === 'xlayer' && xlExecResult
-                ? { swapTxHash: xlExecResult.mintTxHash ?? '', depositTxHash: xlExecResult.depositTxHash, xstockOut: xlExecResult.xstockOut, xstockSymbol: xlExecResult.xstockSymbol, mode: 'xlayer-testnet' }
+                ? { swapTxHash: xlExecResult.mintTxHash ?? '', depositTxHash: xlExecResult.depositTxHash, xstockOut: xlExecResult.xstockOut, xstockSymbol: xlExecResult.xstockSymbol, mode: route.tagLabel === 'Arbitrum Vault' ? 'arbitrum-testnet' : 'xlayer-testnet' }
                 : execResult)
               : undefined
 
@@ -694,11 +974,12 @@ export default function IntentPanel({ initialAsset = 'TSLA' }: { initialAsset?: 
                 onExecute={canExecute
                   ? () => {
                       if (isXLayer) {
-                        if (!evmConnected) return  // button is hidden when not connected — handled by onConnectEvm
+                        if (!evmConnected) return
+                        const evmChain = route.tagLabel === 'Arbitrum Vault' ? 'arbitrum' as const : 'xlayer' as const
                         setExecRouteId(route.id)
                         setExecChain('xlayer')
                         xlResetExec()
-                        xlExecute(asset, parseFloat(amountUsd))
+                        xlExecute(asset, parseFloat(amountUsd), evmChain)
                       } else {
                         if (!connected) { connectPhantom(); return }
                         setExecRouteId(route.id)

@@ -2,7 +2,7 @@
 
 import { X } from "lucide-react";
 import { Quote } from "@/lib/mock-data";
-import { KYBER_SUPPORTED_CHAINS } from "@/lib/web3";
+import { KYBER_SUPPORTED_CHAINS } from "@/lib/chains";
 import SwapWidget from "./SwapWidget";
 import JupiterSwapWidget from "./JupiterSwapWidget";
 

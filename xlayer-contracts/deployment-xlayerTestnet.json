@@ -23,5 +23,20 @@
     "METAx": "0xc0d75D94173bbfD8fe57eBF90011547bE815923D",
     "COINx": "0x1CF4212B49E4C966df7A0215d9d5c95086191BEF",
     "MSTRx": "0x8841c470dD56d63D8e37868536fF42ACb4663584"
-  }
+  },
+  "portfolioVault": "0x7607002ff5d5a1D12eA3a788f03005083D1a02dD",
+  "portfolioAssets": [
+    "TSLAx",
+    "NVDAx",
+    "AAPLx",
+    "SPYx",
+    "GOOGLx"
+  ],
+  "portfolioWeights": [
+    2500,
+    2500,
+    2000,
+    1500,
+    1500
+  ]
 }

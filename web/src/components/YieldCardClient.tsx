@@ -12,6 +12,8 @@ const PROTOCOL_META: Record<string, { color: string; bg: string; border: string;
   raydium: { color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' },
   shift:   { color: '#DC2626', bg: '#FEF2F2', border: '#FECACA' },
   onstock: { color: '#059669', bg: '#F0FDF4', border: '#86EFAC', logo: '◎' },
+  'xlayer-vault': { color: '#6366F1', bg: '#F5F3FF', border: '#DDD6FE', logo: '⬡' },
+  'arbitrum-vault': { color: '#28A0F0', bg: '#EFF6FF', border: '#93C5FD', logo: 'ARB' },
 }
 
 const RISK_BADGE: Record<string, { label: string; color: string; bg: string }> = {
@@ -42,6 +44,8 @@ export default function YieldCardClient({ y, autoExpand, defaultTab }: {
 
   const actionLabel = y.protocol === 'kamino' ? 'Supply on OnStock'
     : y.protocol === 'onstock' ? 'Deposit into Vault'
+    : y.protocol === 'xlayer-vault' ? 'Deposit into X Layer Vault'
+    : y.protocol === 'arbitrum-vault' ? 'Deposit into Arbitrum Vault'
     : 'View Strategy'
 
   return (
@@ -82,6 +86,42 @@ export default function YieldCardClient({ y, autoExpand, defaultTab }: {
         <div style={{ fontSize: 11, color: '#334155', marginBottom: 10, lineHeight: 1.4 }}>
           {y.actionLabel}
         </div>
+
+        {/* Arbitrum Vault badges */}
+        {y.protocol === 'arbitrum-vault' && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 8,
+              background: '#EFF6FF', color: '#28A0F0', border: '1px solid #93C5FD' }}>
+              ERC4626
+            </span>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 8,
+              background: '#EFF6FF', color: '#28A0F0', border: '1px solid #93C5FD' }}>
+              Arbitrum Sepolia
+            </span>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 8,
+              background: '#F0FDF4', color: '#16A34A', border: '1px solid #86EFAC' }}>
+              Non-custodial
+            </span>
+          </div>
+        )}
+
+        {/* X Layer Vault badges */}
+        {y.protocol === 'xlayer-vault' && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 8,
+              background: '#EEF2FF', color: '#6366F1', border: '1px solid #C7D2FE' }}>
+              ERC4626
+            </span>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 8,
+              background: '#EEF2FF', color: '#6366F1', border: '1px solid #C7D2FE' }}>
+              X Layer Testnet
+            </span>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 8,
+              background: '#F0FDF4', color: '#16A34A', border: '1px solid #86EFAC' }}>
+              Non-custodial
+            </span>
+          </div>
+        )}
 
         {/* OnStock Vault badges */}
         {y.protocol === 'onstock' && (

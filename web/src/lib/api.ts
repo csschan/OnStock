@@ -4,7 +4,10 @@
 import type { Quote } from './mock-data'
 import { CHAIN_ID, USDC_BY_CHAIN } from './chains'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'
+// SSR uses internal URL (localhost), client uses public URL
+const API_BASE = typeof window === 'undefined'
+  ? (process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api')
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api')
 
 // ─── 原始后端类型 ───
 

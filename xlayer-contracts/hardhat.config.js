@@ -20,5 +20,15 @@ module.exports = {
       chainId: 196,
       accounts: [PRIVATE_KEY],
     },
+    arbitrumSepolia: {
+      url: "https://sepolia-rollup.arbitrum.io/rpc",
+      chainId: 421614,
+      accounts: [PRIVATE_KEY],
+    },
+    robinhoodTestnet: {
+      url: "https://rpc.testnet.chain.robinhood.com",
+      chainId: 46630,
+      accounts: [PRIVATE_KEY],
+    },
   },
 };

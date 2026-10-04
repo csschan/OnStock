@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { fetchEarnOverview, type DefiYield } from '@/lib/api'
 import YieldCardClient from '@/components/YieldCardClient'
 import XLayerVaultsPanel from '@/components/XLayerVaultsPanel'
+import ArbitrumVaultsPanel from '@/components/ArbitrumVaultsPanel'
 
 const TYPE_LABEL: Record<string, string> = {
   lending: 'Lending', cdp: 'CDP / Mint', lp: 'Liquidity Pool', leveraged: 'Leveraged Token',
@@ -13,7 +14,7 @@ function fmt(n: number): string {
   return n > 0 ? `$${n.toFixed(0)}` : '-'
 }
 
-function AssetSection({ asset, yields, focusAsset }: { asset: string; yields: DefiYield[]; focusAsset?: string }) {
+function AssetSection({ asset, yields, focusAsset, focusChain }: { asset: string; yields: DefiYield[]; focusAsset?: string; focusChain?: string }) {
   const sorted = [...yields].sort((a, b) => b.netApy - a.netApy)
   const best = sorted[0]
   const ticker = asset.endsWith('x') ? asset.slice(0, -1) : asset
@@ -50,8 +51,8 @@ function AssetSection({ asset, yields, focusAsset }: { asset: string; yields: De
           <YieldCardClient
             key={`${y.protocol}-${y.action}-${i}`}
             y={y}
-            autoExpand={focusAsset === asset && y.protocol === 'onstock'}
-            defaultTab={focusAsset === asset && y.protocol === 'onstock' ? 'withdraw' : 'deposit'}
+            autoExpand={focusAsset === asset && y.protocol === 'onstock' && (!focusChain || focusChain === 'solana')}
+            defaultTab={focusAsset === asset && y.protocol === 'onstock' && (!focusChain || focusChain === 'solana') ? 'withdraw' : 'deposit'}
           />
         ))}
       </div>
@@ -59,8 +60,8 @@ function AssetSection({ asset, yields, focusAsset }: { asset: string; yields: De
   )
 }
 
-export default async function EarnPage({ searchParams }: { searchParams: Promise<{ asset?: string }> }) {
-  const { asset: focusAsset } = await searchParams
+export default async function EarnPage({ searchParams }: { searchParams: Promise<{ asset?: string; chain?: string }> }) {
+  const { asset: focusAsset, chain: focusChain } = await searchParams
   const data = await fetchEarnOverview()
 
   if (!data || data.yields.length === 0) {
@@ -190,16 +191,19 @@ export default async function EarnPage({ searchParams }: { searchParams: Promise
         </div>
       )}
 
+      {/* X Layer Vaults — shown first */}
+      <XLayerVaultsPanel focusAsset={focusChain === 'xlayer' ? focusAsset : undefined} />
+
+      {/* Arbitrum Vaults */}
+      <ArbitrumVaultsPanel focusAsset={focusChain === 'arbitrum' ? focusAsset : undefined} />
+
       {/* Solana asset sections */}
-      <div style={{ fontSize: 13, fontWeight: 700, color: '#9945FF', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#9945FF', marginBottom: 16, marginTop: 32, display: 'flex', alignItems: 'center', gap: 8 }}>
         <span>◎</span> Solana
       </div>
       {assetOrder.map(([asset, yields]) => (
-        <AssetSection key={asset} asset={asset} yields={yields} focusAsset={focusAsset} />
+        <AssetSection key={asset} asset={asset} yields={yields} focusAsset={focusAsset} focusChain={focusChain} />
       ))}
-
-      {/* X Layer Vaults */}
-      <XLayerVaultsPanel />
     </div>
   )
 }

@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { label: 'Markets',   href: '/markets' },
   { label: 'Earn',      href: '/earn' },
   { label: 'Intent',    href: '/intent' },
+  { label: 'Trade',     href: '/gateway' },
   { label: 'Portfolio Builder', href: '/portfolio-builder' },
   { label: 'Arbitrage', href: '/arbitrage' },
   { label: 'Portfolio', href: '/portfolio' },

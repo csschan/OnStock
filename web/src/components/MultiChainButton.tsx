@@ -5,6 +5,9 @@ import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import { useSolanaNetwork, type SolanaNetwork } from './SolanaWalletProvider'
 import { usePhantom } from './PhantomProvider'
 
+// Chains that require OKX Wallet specifically (OKX L2s)
+const OKX_ONLY_CHAINS = new Set([1952])
+
 const SOLANA_NETS: { id: SolanaNetwork; label: string; desc: string; color: string }[] = [
   { id: 'localnet', label: 'Localnet',  desc: 'localhost:8899',              color: '#F59E0B' },
   { id: 'devnet',   label: 'Devnet',    desc: 'api.devnet.solana.com',      color: '#8B5CF6' },
@@ -17,7 +20,9 @@ const EVM_CHAINS: { id: number; label: string; color: string }[] = [
   { id: 8453,  label: 'Base',            color: '#0052FF' },
   { id: 42161, label: 'Arbitrum',        color: '#28A0F0' },
   { id: 4663,  label: 'Robinhood Chain', color: '#00C805' },
-  { id: 195,   label: 'X Layer Testnet', color: '#6366F1' },
+  { id: 1952,   label: 'X Layer Testnet',    color: '#6366F1' },
+  { id: 421614, label: 'Arbitrum Sepolia',  color: '#28A0F0' },
+  { id: 46630,  label: 'Robinhood Testnet', color: '#00C805' },
 ]
 
 function shortAddr(addr: string) {
@@ -26,6 +31,7 @@ function shortAddr(addr: string) {
 
 export default function MultiChainButton() {
   const [open, setOpen] = useState(false)
+  const [okxNotice, setOkxNotice] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   // Solana — direct Phantom API
@@ -33,18 +39,30 @@ export default function MultiChainButton() {
   const { publicKey, connected: solConnected, connect: connectPhantom, disconnect: solDisconnect } = usePhantom()
 
   // EVM
-  const { address: evmAddr, isConnected: evmConnected, chain: evmChain } = useAccount()
+  const { address: evmAddr, isConnected: evmConnected, chain: evmChain, connector: evmConnector } = useAccount()
   const { connect: evmConnect, connectors } = useConnect()
   const { disconnect: evmDisconnect } = useDisconnect()
   const { switchChain } = useSwitchChain()
 
-  function connectEvm() {
-    // Priority: OKX Wallet (window.okxwallet) → MetaMask → any injected
-    // window.okxwallet is separate from window.ethereum, never Phantom
-    const okx = connectors.find(c => c.id === 'okxwallet')
-    if (okx) { evmConnect({ connector: okx }); return }
-    const mm = connectors.find(c => c.id === 'metaMask')
+  // EIP-6963: wagmi auto-discovers all wallets. Filter for EVM wallets.
+  const evmConnectorList = connectors.filter(c =>
+    c.name.toLowerCase().includes('metamask') ||
+    c.name.toLowerCase().includes('coinbase') ||
+    c.name.toLowerCase().includes('okx') ||
+    c.type === 'injected'
+  )
+
+  function connectEvm(connectorId?: string) {
+    if (connectorId) {
+      const c = connectors.find(c => c.id === connectorId || c.uid === connectorId)
+      if (c) { evmConnect({ connector: c }); return }
+    }
+    // Default: use MetaMask (id: 'io.metamask')
+    const mm = connectors.find(c => c.id === 'io.metamask')
     if (mm) { evmConnect({ connector: mm }); return }
+    // Fallback: OKX
+    const okx = connectors.find(c => c.id === 'com.okex.wallet')
+    if (okx) { evmConnect({ connector: okx }); return }
     if (connectors[0]) evmConnect({ connector: connectors[0] })
   }
 
@@ -54,7 +72,13 @@ export default function MultiChainButton() {
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Debug: log discovered connectors
+  useEffect(() => {
+    console.log('[Wallets] Discovered connectors:', connectors.map(c => ({ id: c.id, name: c.name, type: c.type, uid: c.uid })))
+  }, [connectors])
 
   const hasAnyWallet = solConnected || evmConnected
   const activeColor = solConnected ? solColor : evmChain ? (EVM_CHAINS.find(c => c.id === evmChain.id)?.color ?? '#64748B') : '#2563EB'
@@ -63,7 +87,7 @@ export default function MultiChainButton() {
     <div ref={ref} style={{ position: 'relative' }}>
       {/* Main button */}
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { setOpen(o => !o); setOkxNotice(false) }}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '6px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700,
@@ -161,22 +185,62 @@ export default function MultiChainButton() {
                   }}>Disconnect</button>
                 </div>
               ) : (
-                <button
-                  onClick={() => { connectEvm(); setOpen(false) }}
-                  style={{
-                    fontSize: 10, fontWeight: 700, color: '#fff', background: '#627EEA',
-                    border: 'none', borderRadius: 6, padding: '3px 10px', cursor: 'pointer',
-                  }}
-                >Connect EVM (MetaMask / OKX)</button>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {connectors.filter(c => c.id !== 'org.tronlink.www').map(c => (
+                    <button
+                      key={c.uid}
+                      onClick={() => { evmConnect({ connector: c }); setOpen(false) }}
+                      style={{
+                        fontSize: 9, fontWeight: 700, color: '#fff',
+                        background: c.id === 'io.metamask' ? '#E8831D'
+                          : c.id === 'app.phantom' ? '#AB9FF2'
+                          : c.id === 'com.okex.wallet' ? '#000'
+                          : '#627EEA',
+                        border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
+                      }}
+                    >{c.name}</button>
+                  ))}
+                </div>
               )}
             </div>
+            {okxNotice && (
+              <div style={{
+                margin: '2px 0 6px', padding: '7px 10px', borderRadius: 8,
+                background: '#FFF7ED', border: '1px solid #FED7AA', fontSize: 10, color: '#92400E',
+                lineHeight: 1.5,
+              }}>
+                <strong>X Layer requires OKX Wallet.</strong><br />
+                Please install the{' '}
+                <a href="https://www.okx.com/web3" target="_blank" rel="noreferrer"
+                  style={{ color: '#6366F1', textDecoration: 'underline' }}>OKX Wallet extension</a>
+                {' '}and connect it above.
+              </div>
+            )}
             {EVM_CHAINS.map(c => {
               const isActive = evmChain?.id === c.id
+              const needsOkx = OKX_ONLY_CHAINS.has(c.id)
+              // OKX Wallet installed = window.okxwallet exists (separate from window.ethereum)
+              const okxInstalled = typeof window !== 'undefined' && !!(window as any).okxwallet
+              const blocked = evmConnected && needsOkx && !okxInstalled
               return (
                 <button
                   key={c.id}
-                  onClick={() => {
-                    if (evmConnected && switchChain) switchChain({ chainId: c.id })
+                  onClick={async () => {
+                    if (blocked) { setOkxNotice(true); return }
+                    if (!evmConnected) {
+                      // Auto-connect MetaMask first, then switch
+                      const mm = connectors.find(cn => cn.id === 'io.metamask')
+                      if (mm) {
+                        evmConnect({ connector: mm }, {
+                          onSuccess: () => {
+                            if (switchChain) switchChain({ chainId: c.id })
+                          }
+                        })
+                      }
+                      setOpen(false)
+                      return
+                    }
+                    if (switchChain) switchChain({ chainId: c.id })
                     setOpen(false)
                   }}
                   style={{
@@ -195,6 +259,11 @@ export default function MultiChainButton() {
                   <span style={{ fontSize: 11, fontWeight: isActive ? 700 : 500, color: isActive ? c.color : '#334155', flex: 1 }}>
                     {c.label}
                   </span>
+                  {needsOkx && (
+                    <span style={{ fontSize: 8, color: '#6366F1', background: '#EEF2FF', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>
+                      OKX
+                    </span>
+                  )}
                   {isActive && <span style={{ fontSize: 10, color: c.color }}>✓</span>}
                 </button>
               )

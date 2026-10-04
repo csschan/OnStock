@@ -149,6 +149,14 @@ async function fetchNestUSDYields(): Promise<DefiYield[]> {
 
 // ─── Raydium LP ────────────────────────────────────
 
+// Raydium pool stats cache — populated during fetchRaydiumYields()
+const raydiumPoolStatsCache = new Map<string, { tvl: number; volume24h: number; poolAgeDays: number }>()
+
+/** Returns real on-chain pool stats for a given xStock symbol (e.g. 'TSLAx') */
+export function getRaydiumPoolStats(symbol: string): { tvl: number; volume24h: number; poolAgeDays: number } | null {
+  return raydiumPoolStatsCache.get(symbol) ?? null
+}
+
 interface RaydiumPool {
   id: string
   type: string
@@ -159,6 +167,7 @@ interface RaydiumPool {
   week: { apr: number }
   month: { apr: number }
   feeRate: number
+  openTime?: number  // Unix seconds of pool creation (CLMM pools)
 }
 
 async function fetchRaydiumYields(): Promise<DefiYield[]> {
@@ -183,6 +192,16 @@ async function fetchRaydiumYields(): Promise<DefiYield[]> {
       const dayApr = best.day?.apr ?? 0
       const feeApr = best.day?.feeApr ?? 0
       const rewardApr = best.day?.rewardApr?.reduce((s: number, r: { apr: number }) => s + r.apr, 0) ?? 0
+
+      // Store pool stats for intentRouter to use in assessPoolHealth
+      const poolAgeDays = best.openTime
+        ? Math.floor((Date.now() / 1000 - best.openTime) / 86400)
+        : 90  // fallback if openTime not available
+      raydiumPoolStatsCache.set(symbol, {
+        tvl: best.tvl,
+        volume24h: best.day?.volume ?? 0,
+        poolAgeDays,
+      })
 
       results.push({
         protocol: 'raydium',
@@ -262,17 +281,26 @@ const VAULT_APY_BY_ASSET: Record<string, number> = {
   MSTRx:  5.50,
 }
 
-// Real stock oracle prices (USD) — used to convert token TVL → USD TVL
-// Updated periodically; fallback values based on recent market data
-const STOCK_PRICES: Record<string, number> = {
-  TSLAx:  250,
-  NVDAx:  130,
-  SPYx:   560,
-  AAPLx:  220,
-  GOOGLx: 190,
-  METAx:  590,
-  COINx:  260,
-  MSTRx:  380,
+// Real stock oracle prices — sourced from stockprice.ts latestPrices cache.
+// Fallback values used until first Yahoo Finance fetch completes.
+import { latestPrices as yahooLatestPrices } from './stockprice.js'
+
+const XSTOCK_TO_TICKER: Record<string, string> = {
+  TSLAx: 'TSLA', NVDAx: 'NVDA', SPYx: 'SPY', AAPLx: 'AAPL',
+  GOOGLx: 'GOOGL', METAx: 'META', COINx: 'COIN', MSTRx: 'MSTR', CRCLx: 'CRCL',
+}
+const FALLBACK_PRICES: Record<string, number> = {
+  TSLAx: 250, NVDAx: 130, SPYx: 560, AAPLx: 220,
+  GOOGLx: 190, METAx: 590, COINx: 260, MSTRx: 380,
+}
+
+function getStockPrice(xstockSymbol: string): number {
+  const ticker = XSTOCK_TO_TICKER[xstockSymbol]
+  if (ticker) {
+    const live = yahooLatestPrices.get(ticker)
+    if (live && live > 0) return live
+  }
+  return FALLBACK_PRICES[xstockSymbol] ?? 100
 }
 
 async function fetchVaultTvl(): Promise<Record<string, number>> {
@@ -306,7 +334,7 @@ async function fetchVaultTvl(): Promise<Record<string, number>> {
         if (!info?.data || info.data.length < 73) return { asset, tvlUsd: 0 }
         const totalDeposited = Number(info.data.readBigUInt64LE(8 + 32 + 32 + 32))
         const tokenAmount    = totalDeposited / 10 ** 6
-        const priceUsd       = STOCK_PRICES[asset] ?? 100
+        const priceUsd       = getStockPrice(asset)
         return { asset, tvlUsd: tokenAmount * priceUsd }
       })
     )

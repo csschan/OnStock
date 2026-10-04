@@ -4,6 +4,10 @@ members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+zeroize = "=1.8.1"
+zeroize_derive = "=1.4.2"
+
 [profile.release]
 overflow-checks = true
 lto = "fat"

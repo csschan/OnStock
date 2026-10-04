@@ -2,7 +2,7 @@
 // Deployed contracts from xlayer-contracts/deployment-xlayerTestnet.json
 
 export const XLAYER_CONFIG = {
-  chainId: 195,
+  chainId: 1952,
   rpc: 'https://testrpc.xlayer.tech',
   explorer: 'https://www.okx.com/explorer/xlayer-test',
   gasToken: 'OKB',

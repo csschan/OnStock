@@ -9,6 +9,12 @@ const TICKERS = [
   'SNDK', 'INTC', 'MU',                       // Binance 独有
 ]
 
+// Exported caches — populated on each fetch cycle
+// oracleTimestamps: ticker → Unix seconds of last trade (regularMarketTime)
+// latestPrices: ticker → USD price
+export const oracleTimestamps = new Map<string, number>()
+export const latestPrices     = new Map<string, number>()
+
 export async function fetchStockPrice(ticker: string): Promise<number | null> {
   try {
     const res = await axios.get(
@@ -21,8 +27,14 @@ export async function fetchStockPrice(ticker: string): Promise<number | null> {
         timeout: 8000,
       }
     )
-    const price = res.data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null
-    if (price) console.log(`[Yahoo] ${ticker} = $${price.toFixed(2)}`)
+    const meta  = res.data?.chart?.result?.[0]?.meta
+    const price = meta?.regularMarketPrice ?? null
+    const ts    = meta?.regularMarketTime  ?? null   // Unix seconds of last trade
+    if (price) {
+      console.log(`[Yahoo] ${ticker} = $${price.toFixed(2)}`)
+      if (ts) oracleTimestamps.set(ticker, ts)
+      latestPrices.set(ticker, price)
+    }
     return price
   } catch (err) {
     console.error(`[Yahoo] Failed to fetch ${ticker}:`, (err as Error).message)

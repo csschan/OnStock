@@ -7,8 +7,14 @@
  */
 
 import { getLatestPrices, getPriceHistory } from '../aggregator.js'
-import { fetchAllDefiYields } from '../fetchers/defiYields.js'
-import { XLAYER_CONFIG, XLAYER_AAVE } from '../config/xlayer.js'
+import { fetchAllDefiYields, getRaydiumPoolStats } from '../fetchers/defiYields.js'
+import { oracleTimestamps } from '../fetchers/stockprice.js'
+import { getEvmVaultData } from '../services/evmVaultTvl.js'
+import { XLAYER_CONFIG } from '../config/xlayer.js'
+import { ARBITRUM_CONFIG } from '../config/arbitrum.js'
+import { calculateFreshness, getMarketStatus, type MarketStatusResult, type FreshnessResult } from '../config/marketStatus.js'
+import { getIssuerProfile, assessPoolHealth, type IssuerProfile, type PoolHealthLabel } from '../config/issuerHealth.js'
+import { TOKENS } from '../config/tokens.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -16,6 +22,22 @@ export interface IntentRequest {
   asset: string                          // 'TSLA', 'NVDA', etc. (ticker, not xStock symbol)
   amountUsd: number
   riskTolerance: 'low' | 'medium' | 'high'
+  holdingDays?: number                   // default 30
+}
+
+// ─── Net Value Projection ───────────────────────────────────────────────────
+// Full-cost comparison: not just APY, but entry cost + gas + slippage + yield
+
+export interface NetValueProjection {
+  chain: string                // 'solana' | 'xlayer' | 'arbitrum'
+  entryPremiumPct: number      // DEX-NAV deviation (0 for oracle-minted)
+  estimatedSlippagePct: number // impact from pool depth
+  gasCostUsd: number           // estimated gas
+  effectiveEntryUsd: number    // amount after entry costs
+  projectedYieldUsd: number    // yield over holding period
+  netValueUsd: number          // final value = effectiveEntry + yield - gas
+  breakEvenDays: number | null // days to recover entry premium vs best alternative
+  holdingDays: number
 }
 
 export type RouteAction =
@@ -37,7 +59,41 @@ export interface RouteStep {
   url?: string
 }
 
-export type RouteTag = 'best_entry' | 'max_yield' | 'leveraged' | 'defensive'
+export type RouteTag = 'best_entry' | 'max_yield' | 'leveraged' | 'defensive' | 'xlayer_vault'
+
+// ─── RWA Multi-Dimensional Route Score ──────────────────────────────────────
+// Unlike generic DEX routers, this scores routes on dimensions unique to
+// tokenized securities: NAV deviation, price freshness, issuer trust.
+
+export interface RwaRouteScore {
+  overall: number             // 0–100 composite score
+  dimensions: {
+    liquidityScore: number    // 0–1 based on pool TVL/depth
+    slippageScore: number     // 0–1 (1 = no slippage, 0 = high slippage)
+    deviationScore: number    // 0–1 (1 = on NAV, 0 = >5% off)
+    freshnessScore: number    // 0–1 from marketStatus module
+    issuerTrustScore: number  // 0–1 from issuer profile
+  }
+  weights: RwaScoreWeights    // Transparent weights used in calculation
+  deviationPct: number        // abs(DEX - NAV) / NAV
+  deviationCategory: 'normal' | 'elevated' | 'high'  // <2%, 2-5%, >5%
+}
+
+export interface RwaScoreWeights {
+  liquidity: number     // default 0.25
+  slippage: number      // default 0.25
+  deviation: number     // default 0.25
+  freshness: number     // default 0.15
+  issuerTrust: number   // default 0.10
+}
+
+export const DEFAULT_RWA_WEIGHTS: RwaScoreWeights = {
+  liquidity: 0.25,
+  slippage: 0.25,
+  deviation: 0.25,
+  freshness: 0.15,
+  issuerTrust: 0.10,
+}
 
 export interface RecommendedRoute {
   id: RouteTag
@@ -52,6 +108,8 @@ export interface RecommendedRoute {
   confidence: 'high' | 'medium' | 'low'
   disabled?: boolean
   disabledReason?: string
+  rwaScore?: RwaRouteScore    // RWA-aware multi-dimensional score
+  netValue?: NetValueProjection // Full-cost projection
 }
 
 export interface IntentRouterResult {
@@ -67,6 +125,15 @@ export interface IntentRouterResult {
   bestKaminoApy: number
   // X Layer cross-chain info
   xlayerVaultApy: number
+  arbitrumVaultApy: number
+  // RWA-specific context (unique to tokenized securities)
+  freshness: FreshnessResult
+  issuerProfile: IssuerProfile
+  poolHealth: PoolHealthLabel
+  marketStatus: MarketStatusResult
+  rwaScoreWeights: RwaScoreWeights
+  holdingDays: number
+  bestNetValueChain: string   // which chain wins on net value
   // Routes (sorted by recommendation score)
   routes: RecommendedRoute[]
   // Summary headline
@@ -317,6 +384,104 @@ function buildPreIpoRoutes(
   })
 }
 
+// ─── RWA Route Scoring Engine ───────────────────────────────────────────────
+// Unique to tokenized securities: scores routes on NAV deviation, freshness,
+// issuer trust, liquidity, and slippage — dimensions that 1inch/Paraswap ignore.
+
+// ─── Net Value Calculation ──────────────────────────────────────────────────
+// Total cost optimization: entry premium + slippage + gas vs yield over time
+
+const CHAIN_GAS_USD: Record<string, number> = {
+  solana: 0.15,
+  xlayer: 0.05,
+  arbitrum: 0.30,
+}
+
+function calculateNetValue(
+  amountUsd: number,
+  chain: string,
+  entryPremiumPct: number,    // DEX-NAV deviation for Solana; 0 for EVM mints
+  estimatedSlippagePct: number,
+  apyPct: number,
+  holdingDays: number,
+): NetValueProjection {
+  const gasCostUsd = CHAIN_GAS_USD[chain] ?? 0.20
+  const entryCostPct = Math.max(0, entryPremiumPct) + estimatedSlippagePct
+  const effectiveEntryUsd = amountUsd * (1 - entryCostPct / 100)
+  const projectedYieldUsd = effectiveEntryUsd * (apyPct / 100) * (holdingDays / 365)
+  const netValueUsd = effectiveEntryUsd + projectedYieldUsd - gasCostUsd
+
+  // Break-even: how many days to recover entry premium via APY advantage
+  // Compared to a hypothetical 0-premium route
+  let breakEvenDays: number | null = null
+  if (entryCostPct > 0 && apyPct > 0) {
+    const lostToEntry = amountUsd * entryCostPct / 100
+    const dailyYield = effectiveEntryUsd * (apyPct / 100) / 365
+    breakEvenDays = dailyYield > 0 ? Math.ceil(lostToEntry / dailyYield) : null
+  }
+
+  return {
+    chain,
+    entryPremiumPct: Number(entryPremiumPct.toFixed(3)),
+    estimatedSlippagePct: Number(estimatedSlippagePct.toFixed(3)),
+    gasCostUsd,
+    effectiveEntryUsd: Number(effectiveEntryUsd.toFixed(2)),
+    projectedYieldUsd: Number(projectedYieldUsd.toFixed(2)),
+    netValueUsd: Number(netValueUsd.toFixed(2)),
+    breakEvenDays,
+    holdingDays,
+  }
+}
+
+function calculateRwaRouteScore(
+  premiumPct: number,          // DEX-NAV deviation
+  freshnessScore: number,      // 0-1 from freshness module
+  issuerTrustScore: number,    // 0-1 from issuer profile
+  poolTvlUsd: number,          // Pool TVL in USD
+  estimatedSlippagePct: number, // Estimated slippage for the trade
+  weights: RwaScoreWeights = DEFAULT_RWA_WEIGHTS,
+): RwaRouteScore {
+  const absDev = Math.abs(premiumPct)
+
+  // Deviation score: 1.0 at 0%, 0.0 at 5%+
+  const deviationScore = Math.max(0, Math.min(1, 1 - absDev / 5))
+
+  // Deviation category
+  let deviationCategory: 'normal' | 'elevated' | 'high'
+  if (absDev < 2) deviationCategory = 'normal'
+  else if (absDev < 5) deviationCategory = 'elevated'
+  else deviationCategory = 'high'
+
+  // Liquidity score: 0-1 based on TVL (saturates at $500k)
+  const liquidityScore = Math.min(1, poolTvlUsd / 500_000)
+
+  // Slippage score: 1.0 at 0%, 0.0 at 3%+
+  const slippageScore = Math.max(0, Math.min(1, 1 - estimatedSlippagePct / 3))
+
+  // Weighted composite (0-100)
+  const overall = Math.round(
+    (liquidityScore * weights.liquidity +
+     slippageScore * weights.slippage +
+     deviationScore * weights.deviation +
+     freshnessScore * weights.freshness +
+     issuerTrustScore * weights.issuerTrust) * 100
+  )
+
+  return {
+    overall: Math.max(0, Math.min(100, overall)),
+    dimensions: {
+      liquidityScore: Number(liquidityScore.toFixed(3)),
+      slippageScore: Number(slippageScore.toFixed(3)),
+      deviationScore: Number(deviationScore.toFixed(3)),
+      freshnessScore: Number(freshnessScore.toFixed(3)),
+      issuerTrustScore: Number(issuerTrustScore.toFixed(3)),
+    },
+    weights,
+    deviationPct: Number(absDev.toFixed(3)),
+    deviationCategory,
+  }
+}
+
 // ─── Route generation logic ─────────────────────────────────────────────────
 
 // Minimum TVL (USD) required before recommending a pool
@@ -356,6 +521,15 @@ function buildRoutes(
   vaultTvl: number,
   kaminoTvl: number,
   oraclePrice: number | null,
+  freshnessScore: number,
+  issuerTrustScore: number,
+  dexPoolTvl: number,
+  holdingDays: number,
+  weights: RwaScoreWeights = DEFAULT_RWA_WEIGHTS,
+  xlayerVaultTvl = 0,
+  arbitrumVaultTvl = 0,
+  xlayerVaultApyLive = 0,
+  arbitrumVaultApyLive = 0,
 ): RecommendedRoute[] {
 
   const routes: RecommendedRoute[] = []
@@ -369,6 +543,18 @@ function buildRoutes(
     : `discount ${premiumPct.toFixed(2)}%`
 
   const shiftTokens = SHIFT_TOKENS[ticker]
+
+  // RWA score helper — reused for each route with route-specific slippage estimate
+  const mkScore = (slippagePct: number, tvl: number = dexPoolTvl) =>
+    calculateRwaRouteScore(premiumPct, freshnessScore, issuerTrustScore, tvl, slippagePct, weights)
+
+  // Freshness-based warnings injected into all routes when stale
+  const freshnessWarnings: string[] = []
+  if (freshnessScore < 0.4) {
+    freshnessWarnings.push(`⚠️ NAV freshness is low (${(freshnessScore * 100).toFixed(0)}%) — traditional market may be closed; DEX price could diverge significantly from next open price`)
+  } else if (freshnessScore < 0.7) {
+    freshnessWarnings.push(`NAV freshness is moderate (${(freshnessScore * 100).toFixed(0)}%) — consider timing risk before large trades`)
+  }
 
   // ── Route 1: Best Entry (spot buy + Vault) ────────────────────────────────
   {
@@ -618,22 +804,12 @@ function buildRoutes(
     }
   }
 
-  // ── Route 5: X Layer Cross-Chain (Vault vs Aave comparison) ────────────────
+  // ── Route 5: X Layer Cross-Chain (ERC4626 Vault) ────────────────
   {
-    const xlayerVaultApyBps = XLAYER_CONFIG.apyBps[xstockSymbol] ?? 0
-    const xlayerVaultApy = xlayerVaultApyBps / 100
-    const xlayerAaveApy = XLAYER_AAVE.supplyApy[xstockSymbol] ?? 0
-
-    if (xlayerVaultApy > 0 || xlayerAaveApy > 0) {
-      // Pick the better X Layer yield
-      const useAave = xlayerAaveApy > xlayerVaultApy
-      const bestXlApy = Math.max(xlayerVaultApy, xlayerAaveApy)
-      const bestXlProtocol = useAave ? 'Aave V3' : 'OnStock Vault'
-      const bestXlAction = useAave ? 'kamino_supply' : 'vault_deposit'
-
+    if (xlayerVaultApyLive > 0) {
       routes.push({
         id: 'xlayer_vault',
-        title: `X Layer: ${xstockSymbol} via ${bestXlProtocol} — ${bestXlApy.toFixed(1)}% APY on OKX L2`,
+        title: `X Layer: ${xstockSymbol} Vault — ${xlayerVaultApyLive.toFixed(1)}% APY on OKX L2`,
         tag: 'max_yield',
         tagLabel: 'X Layer Vault',
         steps: [
@@ -642,54 +818,120 @@ function buildRoutes(
             protocol: 'OnStock (X Layer)',
             asset: xstockSymbol,
             amountUsd,
-            description: `Mint ${xstockSymbol} on X Layer Testnet — server issues xStock to your EVM wallet at oracle price $${oraclePrice?.toFixed(2) ?? '—'}`,
+            description: `Mint ${xstockSymbol} on X Layer — server issues xStock to your EVM wallet at oracle price $${oraclePrice?.toFixed(2) ?? '—'}`,
           },
           {
             action: 'buy_spot',
             protocol: 'MetaMask / OKX Wallet',
             asset: xstockSymbol,
             amountUsd,
-            description: `Approve ${xstockSymbol} spend on X Layer (ERC-20 approval — one MetaMask signature)`,
+            description: `Approve ${xstockSymbol} spend on X Layer (ERC-20 approval)`,
           },
           {
-            action: bestXlAction,
-            protocol: `${bestXlProtocol} (X Layer)`,
+            action: 'vault_deposit',
+            protocol: 'OnStock Vault (X Layer)',
             asset: xstockSymbol,
             amountUsd,
-            description: useAave
-              ? `Supply ${xstockSymbol} to Aave V3 on X Layer — earn ${xlayerAaveApy.toFixed(2)}% supply APY`
-              : `Deposit ${xstockSymbol} into ERC4626 Vault on X Layer — earn ${xlayerVaultApy.toFixed(2)}% APY, receive vault shares`,
-            apy: bestXlApy,
+            description: `Deposit ${xstockSymbol} into ERC4626 Vault on X Layer — earn ${xlayerVaultApyLive.toFixed(2)}% APY, receive vault shares`,
+            apy: xlayerVaultApyLive,
           },
         ],
-        projectedApy: bestXlApy,
+        projectedApy: xlayerVaultApyLive,
         totalAmountUsd: amountUsd,
-        reasoning: useAave
-          ? `Aave V3 on X Layer offers ${xlayerAaveApy.toFixed(1)}% supply APY for ${xstockSymbol}, higher than OnStock Vault (${xlayerVaultApy.toFixed(1)}%). Entire execution on X Layer (OKX L2) — no Solana bridge needed. Connect MetaMask or OKX Wallet to execute.`
-          : `OnStock Vault on X Layer offers ${xlayerVaultApy.toFixed(1)}% APY for ${xstockSymbol}. Entire execution on X Layer (OKX L2) — no Solana bridge needed. Server mints xStock at oracle price, two wallet signatures: approve + deposit.`,
+        reasoning: `OnStock Vault on X Layer offers ${xlayerVaultApyLive.toFixed(1)}% APY for ${xstockSymbol}. Entire execution on X Layer (OKX L2) — no Solana bridge needed. Server mints xStock at oracle price, two wallet signatures: approve + deposit.`,
         warnings: [
-          `Requires EVM wallet (MetaMask / OKX Wallet) connected to X Layer Testnet (Chain ID 195)`,
-          `Alternative yield on X Layer: ${useAave ? `OnStock Vault ${xlayerVaultApy.toFixed(1)}% APY` : `Aave V3 ${xlayerAaveApy.toFixed(1)}% APY`}`,
+          `Requires EVM wallet (MetaMask / OKX Wallet) connected to X Layer Testnet (Chain ID 1952)`,
         ],
         confidence: 'high',
       })
     }
   }
 
-  // Sort by recommendation priority
-  // X Layer routes surface first when APY >= best Solana APY (hackathon showcase)
-  const bestSolanaApy = Math.max(
-    ...routes.filter(r => r.tagLabel !== 'X Layer Vault').map(r => r.projectedApy ?? 0)
-  )
+  // ── Route 6: Arbitrum Sepolia (ERC4626 Vault) ──────────────────────────────
+  {
+    const arbApy = arbitrumVaultApyLive
+    const hasArbVault = !!ARBITRUM_CONFIG.vaults[xstockSymbol]
+
+    if (arbApy > 0 && hasArbVault) {
+      routes.push({
+        id: 'xlayer_vault', // reuse tag type
+        title: `Arbitrum: ${xstockSymbol} Vault — ${arbApy.toFixed(1)}% APY on Arbitrum L2`,
+        tag: 'max_yield',
+        tagLabel: 'Arbitrum Vault',
+        steps: [
+          {
+            action: 'buy_spot',
+            protocol: 'OnStock (Arbitrum)',
+            asset: xstockSymbol,
+            amountUsd,
+            description: `Mint ${xstockSymbol} on Arbitrum Sepolia — server issues xStock to your EVM wallet at oracle price $${oraclePrice?.toFixed(2) ?? '—'}`,
+          },
+          {
+            action: 'buy_spot',
+            protocol: 'MetaMask',
+            asset: xstockSymbol,
+            amountUsd,
+            description: `Approve ${xstockSymbol} spend on Arbitrum (ERC-20 approval)`,
+          },
+          {
+            action: 'vault_deposit',
+            protocol: 'OnStock Vault (Arbitrum)',
+            asset: xstockSymbol,
+            amountUsd,
+            description: `Deposit ${xstockSymbol} into ERC4626 Vault on Arbitrum — earn ${arbApy.toFixed(2)}% APY`,
+            apy: arbApy,
+          },
+        ],
+        projectedApy: arbApy,
+        totalAmountUsd: amountUsd,
+        reasoning: `OnStock Vault on Arbitrum Sepolia offers ${arbApy.toFixed(1)}% APY for ${xstockSymbol}. Arbitrum's optimistic rollup provides low gas costs with Ethereum security. Server mints xStock at oracle price, two wallet signatures: approve + deposit.`,
+        warnings: [
+          `Requires EVM wallet connected to Arbitrum Sepolia Testnet (Chain ID 421614)`,
+        ],
+        confidence: 'high',
+      })
+    }
+  }
+
+  // ── Inject RWA scores + Net Value into every route ──
+  const EVM_VAULT_TAGS = new Set(['X Layer Vault', 'Arbitrum Vault'])
+  const TAG_TO_CHAIN: Record<string, string> = { 'X Layer Vault': 'xlayer', 'Arbitrum Vault': 'arbitrum' }
+  for (const route of routes) {
+    const isEvmVault = EVM_VAULT_TAGS.has(route.tagLabel)
+    // Use real on-chain TVL for EVM vaults; fall back to 1M if not yet fetched
+    const evmTvlForRoute = route.tagLabel === 'X Layer Vault'
+      ? (xlayerVaultTvl   > 0 ? xlayerVaultTvl   : 1_000_000)
+      : route.tagLabel === 'Arbitrum Vault'
+      ? (arbitrumVaultTvl > 0 ? arbitrumVaultTvl : 1_000_000)
+      : 0
+    const routeScore = isEvmVault
+      ? calculateRwaRouteScore(0, freshnessScore, issuerTrustScore, evmTvlForRoute, 0, weights)
+      : mkScore(premiumPct > 2 ? 1.5 : 0.5, dexPoolTvl)
+    route.rwaScore = routeScore
+
+    // Net Value projection
+    const chain = TAG_TO_CHAIN[route.tagLabel] ?? 'solana'
+    const entryPrem = isEvmVault ? 0 : Math.max(0, premiumPct)
+    const slippage = isEvmVault ? 0 : (premiumPct > 2 ? 1.5 : 0.5)
+    const apy = route.projectedApy ?? 0
+    route.netValue = calculateNetValue(amountUsd, chain, entryPrem, slippage, apy, holdingDays)
+
+    if (freshnessWarnings.length > 0) {
+      route.warnings = [...freshnessWarnings, ...route.warnings]
+    }
+    if (routeScore.deviationCategory === 'elevated' && !isEvmVault) {
+      route.warnings.unshift(`NAV-DEX deviation is ${routeScore.deviationPct.toFixed(2)}% — on-chain price diverges from custody NAV`)
+    }
+    if (routeScore.deviationCategory === 'high' && !isEvmVault) {
+      route.warnings.unshift(`⚠️ SEVERE: NAV-DEX deviation ${routeScore.deviationPct.toFixed(2)}% — on-chain price is far from actual asset value. Risk of buying at inflated price.`)
+    }
+  }
+
+  // Sort by Net Value (highest first) — the true optimal route
   return routes.sort((a, b) => {
     if (a.disabled && !b.disabled) return 1
     if (!a.disabled && b.disabled) return -1
-    const aIsXLayer = a.tagLabel === 'X Layer Vault'
-    const bIsXLayer = b.tagLabel === 'X Layer Vault'
-    // X Layer goes first when its APY >= best Solana APY
-    if (aIsXLayer && !bIsXLayer && (a.projectedApy ?? 0) >= bestSolanaApy) return -1
-    if (!aIsXLayer && bIsXLayer && (b.projectedApy ?? 0) >= bestSolanaApy) return 1
-    return 0
+    return (b.netValue?.netValueUsd ?? 0) - (a.netValue?.netValueUsd ?? 0)
   })
 }
 
@@ -733,10 +975,37 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
     throw new Error(`Unsupported asset: ${ticker}. Supported: ${Object.keys(TICKER_TO_XSTOCK).join(', ')}`)
   }
 
+  const holdingDays = req.holdingDays ?? 30
   const isPreIpo = PRE_IPO_TICKERS.has(ticker)
 
   const signals = await readMarketSignals(ticker)
   const { oraclePrice, onchainPrice, premiumPct, momentum24h } = signals
+
+  // ── RWA Context: freshness, issuer, market status ──
+  // navTimestamp: real regularMarketTime from Yahoo Finance (Unix seconds of last trade).
+  // During market hours this is near-realtime; after close it's the close timestamp.
+  const now = new Date()
+  const navTimestamp = oracleTimestamps.get(ticker) ?? null
+  const freshness = calculateFreshness(navTimestamp, now)
+  const marketStatus = getMarketStatus(now)
+
+  // Find primary issuer for this ticker
+  const tokenConfig = TOKENS.find(t => t.ticker === ticker && t.chain === 'solana')
+  const issuerId = tokenConfig?.issuer ?? (isPreIpo ? 'prestocks' : 'backed')
+  const issuerProfile = getIssuerProfile(issuerId)
+
+  // Pool health: real TVL + volume from Raydium (populated by defiYields fetch cycle)
+  const priceData = await getLatestPrices(ticker)
+  const bestSource = priceData.sources.find(s => s.chain === 'solana') ?? priceData.sources[0]
+  const dexPoolTvlRaw = bestSource?.liquidityUsd ?? 0
+  const xstockSym = TICKER_TO_XSTOCK[ticker] ?? ticker + 'x'
+  const raydiumStats = getRaydiumPoolStats(xstockSym)
+  const poolTvl     = raydiumStats?.tvl        ?? dexPoolTvlRaw
+  const poolVol24h  = raydiumStats?.volume24h  ?? 0
+  const poolAgeDays = raydiumStats?.poolAgeDays ?? 90
+  const poolHealth  = assessPoolHealth(poolTvl, poolVol24h, poolAgeDays)
+
+  const weights = DEFAULT_RWA_WEIGHTS
 
   // Pre-IPO tokens: no vault, no Kamino, no leverage — swap-only routes
   if (isPreIpo) {
@@ -766,6 +1035,14 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
       bestVaultApy: 0,
       bestKaminoApy: 0,
       xlayerVaultApy: 0,
+      arbitrumVaultApy: 0,
+      freshness,
+      issuerProfile,
+      poolHealth,
+      marketStatus,
+      rwaScoreWeights: weights,
+      holdingDays,
+      bestNetValueChain: 'solana',
       routes,
       marketSummary: `${ticker} mark price ${priceStr}, ${premiumStr}, ${momentumStr} — pre-IPO token, tradeable on Jupiter`,
       generatedAt: new Date().toISOString(),
@@ -773,8 +1050,18 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
   }
 
   // xStocks: full route generation with vault + Kamino + leverage
-  const apys = await readApySignals(xstockSymbol)
+  const [apys, evmData] = await Promise.all([
+    readApySignals(xstockSymbol),
+    getEvmVaultData(),
+  ])
   const { vaultApy, kaminoApy, vaultTvl, kaminoTvl } = apys
+  const xlayerVault   = evmData.xlayer.get(xstockSymbol)
+  const arbitrumVault = evmData.arbitrum.get(xstockSymbol)
+  const xlayerVaultTvl   = xlayerVault?.tvlUsd   ?? 0
+  const arbitrumVaultTvl = arbitrumVault?.tvlUsd  ?? 0
+  // APY from contract (on-chain), falls back to config if vault not yet read
+  const xlayerVaultApyLive   = xlayerVault?.apyPct   ?? (XLAYER_CONFIG.apyBps[xstockSymbol]   ?? 0) / 100
+  const arbitrumVaultApyLive = arbitrumVault?.apyPct ?? (ARBITRUM_CONFIG.apyBps[xstockSymbol] ?? 0) / 100
 
   const routes = buildRoutes(
     ticker,
@@ -788,9 +1075,16 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
     vaultTvl,
     kaminoTvl,
     oraclePrice,
+    freshness.freshnessScore,
+    issuerProfile.trustScore,
+    poolTvl,
+    holdingDays,
+    weights,
+    xlayerVaultTvl,
+    arbitrumVaultTvl,
+    xlayerVaultApyLive,
+    arbitrumVaultApyLive,
   )
-
-  const xlayerApyBps = XLAYER_CONFIG.apyBps[xstockSymbol] ?? 0
 
   return {
     asset: ticker,
@@ -802,7 +1096,15 @@ export async function routeIntent(req: IntentRequest): Promise<IntentRouterResul
     momentum24h,
     bestVaultApy: vaultApy,
     bestKaminoApy: kaminoApy,
-    xlayerVaultApy: xlayerApyBps / 100,
+    xlayerVaultApy: xlayerVaultApyLive,
+    arbitrumVaultApy: arbitrumVaultApyLive,
+    freshness,
+    issuerProfile,
+    poolHealth,
+    marketStatus,
+    rwaScoreWeights: weights,
+    holdingDays,
+    bestNetValueChain: routes[0]?.netValue?.chain ?? 'solana',
     routes,
     marketSummary: buildMarketSummary(xstockSymbol, premiumPct, momentum24h, oraclePrice),
     generatedAt: new Date().toISOString(),
