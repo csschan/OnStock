@@ -90,11 +90,37 @@ solGatewayRouter.get('/info', (_req, res) => {
       programId: deploy.programId,
       gateway: deploy.gateway,
       usdcMint: deploy.usdcMint,
-      osTokens: deploy.osTokens,
+      osTokens: (deploy as any).bridgeOsTokens ?? deploy.osTokens,
+      programOsTokens: deploy.osTokens,
       assetCount: Object.keys(deploy.osTokens).length,
       keeper: keeper?.publicKey.toBase58() ?? null,
     },
   })
+})
+
+// ─── GET /api/sol-gateway/balance/:address/:ticker ──────────────────────────
+
+solGatewayRouter.get('/balance/:address/:ticker', async (req, res) => {
+  if (!deploy) return res.json({ ok: false, error: 'Not deployed' })
+  try {
+    const { address: addr, ticker: t } = req.params
+    const tickerUp = t.toUpperCase()
+    const osMintStr = ((deploy as any).bridgeOsTokens ?? deploy.osTokens)[tickerUp]
+    if (!osMintStr) return res.json({ ok: true, data: { ticker: tickerUp, balance: 0 } })
+
+    const { PublicKey } = await import('@solana/web3.js')
+    const { getAssociatedTokenAddress, getAccount } = await import('@solana/spl-token')
+
+    const mint = new PublicKey(osMintStr)
+    const userPk = new PublicKey(addr)
+    const ata = await getAssociatedTokenAddress(mint, userPk)
+    const acc = await getAccount(connection, ata)
+    const balance = Number(acc.amount) / 1e6
+
+    res.json({ ok: true, data: { ticker: tickerUp, balance, mint: osMintStr } })
+  } catch {
+    res.json({ ok: true, data: { ticker: req.params.ticker?.toUpperCase(), balance: 0 } })
+  }
 })
 
 // ─── GET /api/sol-gateway/asset/:ticker ─────────────────────────────────────

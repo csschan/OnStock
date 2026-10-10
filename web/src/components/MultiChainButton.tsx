@@ -53,17 +53,18 @@ export default function MultiChainButton() {
   )
 
   function connectEvm(connectorId?: string) {
-    if (connectorId) {
-      const c = connectors.find(c => c.id === connectorId || c.uid === connectorId)
-      if (c) { evmConnect({ connector: c }); return }
+    // Find specific connector by id
+    const target = connectorId
+      ? connectors.find(c => c.id === connectorId || c.uid === connectorId)
+      : connectors.find(c => c.id === 'io.metamask') ?? connectors.find(c => c.id === 'com.okex.wallet')
+
+    if (target) {
+      console.log('[EVM Connect] Using connector:', target.id, target.name)
+      evmConnect({ connector: target })
+    } else if (connectors[0]) {
+      console.log('[EVM Connect] Fallback to:', connectors[0].id, connectors[0].name)
+      evmConnect({ connector: connectors[0] })
     }
-    // Default: use MetaMask (id: 'io.metamask')
-    const mm = connectors.find(c => c.id === 'io.metamask')
-    if (mm) { evmConnect({ connector: mm }); return }
-    // Fallback: OKX
-    const okx = connectors.find(c => c.id === 'com.okex.wallet')
-    if (okx) { evmConnect({ connector: okx }); return }
-    if (connectors[0]) evmConnect({ connector: connectors[0] })
   }
 
   useEffect(() => {
@@ -230,9 +231,12 @@ export default function MultiChainButton() {
                     if (!evmConnected) {
                       // Auto-connect MetaMask first, then switch
                       const mm = connectors.find(cn => cn.id === 'io.metamask')
+                      console.log('[Chain Click] Not connected, trying MetaMask:', mm?.id, mm?.name)
+                      console.log('[Chain Click] All connectors:', connectors.map(cn => cn.id))
                       if (mm) {
                         evmConnect({ connector: mm }, {
                           onSuccess: () => {
+                            console.log('[Chain Click] Connected! Switching to chain', c.id)
                             if (switchChain) switchChain({ chainId: c.id })
                           }
                         })

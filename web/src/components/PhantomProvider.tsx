@@ -38,15 +38,32 @@ export default function PhantomProvider({ children }: { children: ReactNode }) {
   const [publicKey, setPublicKey] = useState<PublicKey | null>(null)
   const [connected, setConnected] = useState(false)
 
-  // Restore connection on mount
+  // Restore connection on mount + poll for late Phantom init
   useEffect(() => {
+    const tryRestore = () => {
+      const provider = getProvider()
+      if (!provider) return false
+      if (provider.isConnected && provider.publicKey) {
+        const pk = new PublicKey(provider.publicKey.toString())
+        setPublicKey(pk)
+        setConnected(true)
+        return true
+      }
+      return false
+    }
+
+    // Try immediately
+    if (!tryRestore()) {
+      // Phantom may not be ready yet — poll a few times
+      let attempts = 0
+      const timer = setInterval(() => {
+        attempts++
+        if (tryRestore() || attempts > 10) clearInterval(timer)
+      }, 500)
+    }
+
     const provider = getProvider()
     if (!provider) return
-    if (provider.isConnected && provider.publicKey) {
-      const pk = new PublicKey(provider.publicKey.toString())
-      setPublicKey(pk)
-      setConnected(true)
-    }
     const onConnect = (pk: any) => {
       setPublicKey(new PublicKey(pk.toString()))
       setConnected(true)

@@ -133,17 +133,40 @@ export default function GatewayPanel() {
       }
     } catch {}
 
-    // Solana balances (SPL tokens) — requires Phantom wallet
-    setSolBalance({})
-    setSolUsdcBalance(0)
+    // Solana balances are fetched in a separate useEffect — don't reset here
   }, [address])
 
   useEffect(() => { fetchBalances() }, [fetchBalances])
 
-  // Auto-refresh balances every 15 seconds
+  // Solana balance — query via backend, detect Phantom pubkey directly from window
+  useEffect(() => {
+    let cancelled = false
+    const fetchSolBal = async () => {
+      // Get Phantom pubkey directly — don't rely on PhantomProvider state
+      const phantomPk = solPubkey?.toBase58()
+        ?? (window as any).phantom?.solana?.publicKey?.toBase58()
+        ?? (window as any).solana?.publicKey?.toBase58()
+      if (!phantomPk) return
+
+      try {
+        const res = await fetch(`${API_BASE}/sol-gateway/balance/${phantomPk}/${ticker}`)
+        const json = await res.json()
+        if (json.ok && !cancelled) {
+          setSolBalance(prev => ({ ...prev, [ticker]: json.data.balance }))
+        }
+      } catch {}
+    }
+
+    // Run immediately + retry after 2s (Phantom may not be ready)
+    fetchSolBal()
+    const timer = setTimeout(fetchSolBal, 2000)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [solPubkey, solConnected, ticker])
+
+  // Auto-refresh balances every 60 seconds (avoid Solana devnet rate limit)
   useEffect(() => {
     if (!address) return
-    const timer = setInterval(fetchBalances, 15000)
+    const timer = setInterval(fetchBalances, 60000)
     return () => clearInterval(timer)
   }, [address, fetchBalances])
 
@@ -182,7 +205,15 @@ export default function GatewayPanel() {
 
   // Detect which chain user is on for buy/sell
   const activeEvmChain: ChainId = chain?.id === 46630 ? 'robinhood' : 'arbitrum'
+  // If only Phantom connected (no EVM), active chain is solana
+  const activeChain: ChainId = isConnected ? activeEvmChain : (solConnected ? 'solana' : activeEvmChain)
 
+
+  // Helper: get gas overrides for EVM tx (Arbitrum Sepolia has fluctuating base fee)
+  const getGasParams = () => {
+    // Set high maxFeePerGas to avoid "fee cap too low" errors
+    return { maxFeePerGas: BigInt(500000000), maxPriorityFeePerGas: BigInt(100000000) } // 0.5 gwei max, 0.1 gwei priority
+  }
 
   // Chain configs for tx handling
   const CHAIN_RPC: Record<string, { chainId: number; rpc: string; explorer: string }> = {
@@ -256,7 +287,7 @@ export default function GatewayPanel() {
         const h1 = await walletClient.sendTransaction({
           to: data.approveTx.to as `0x${string}`,
           data: data.approveTx.data as `0x${string}`,
-          chain: chain as any, account: address,
+          chain: chain as any, account: address, ...getGasParams(),
         })
         setTxStatus('Step 1/2: Waiting for approval confirmation...')
         const approved = await waitForTx(h1, activeEvmChain)
@@ -269,7 +300,7 @@ export default function GatewayPanel() {
       const h2 = await walletClient.sendTransaction({
         to: actionTx.to as `0x${string}`,
         data: actionTx.data as `0x${string}`,
-        chain: chain as any, account: address,
+        chain: chain as any, account: address, ...getGasParams(),
       })
       setTxHash(h2)
       setTxStatus('Confirming on chain...')
@@ -315,19 +346,107 @@ export default function GatewayPanel() {
   }, [mode, ticker, numAmount])
 
   const handleSwap = async () => {
-    if (!isConnected || !walletClient || !address) return setTxStatus('Connect wallet first')
-    if (!swapDestAddr) return setTxStatus('Enter destination address')
-
-    // Check user is on the SOURCE chain
-    const srcChainId = CHAIN_RPC[swapSrc]?.chainId
-    if (srcChainId && chain?.id !== srcChainId) {
-      try { switchChain({ chainId: srcChainId }) } catch {}
-      return setTxStatus(`Switch to ${swapSrc === 'robinhood' ? 'Robinhood Testnet' : swapSrc === 'arbitrum' ? 'Arbitrum Sepolia' : swapSrc}`)
+    // Solana source: need Phantom
+    if (swapSrc === 'solana') {
+      if (!solConnected || !solPubkey) return setTxStatus('Connect Phantom first')
+    } else {
+      console.log('[Swap] EVM check:', { isConnected, walletClient: !!walletClient, address, chainId: chain?.id })
+      if (!isConnected || !address) return setTxStatus('Connect EVM wallet first')
+      if (!walletClient) return setTxStatus('Wallet loading... please try again')
+      const srcChainId = CHAIN_RPC[swapSrc]?.chainId
+      if (srcChainId && chain?.id !== srcChainId) {
+        try { switchChain({ chainId: srcChainId }) } catch {}
+        return setTxStatus(`Switch to ${swapSrc === 'robinhood' ? 'Robinhood Testnet' : 'Arbitrum Sepolia'}`)
+      }
     }
+    if (!swapDestAddr) return setTxStatus('Enter destination address')
 
     setLoading(true); setTxStatus(null); setTxHash(null); setSolTxHash(null); setSwapStep(null)
     try {
-      // Step 1: Initiate bridge
+      // Solana → EVM: burn SPL token via Phantom
+      if (swapSrc === 'solana') {
+        setSwapStep('1/3')
+        setTxStatus('Preparing Solana burn...')
+
+        const { Connection, PublicKey, Transaction } = await import('@solana/web3.js')
+        const { createBurnInstruction, getAssociatedTokenAddress } = await import('@solana/spl-token')
+
+        // Get the bridge osToken mint for this ticker
+        const solInfoRes = await fetch(`${API_BASE}/sol-gateway/info`)
+        const solInfo = await solInfoRes.json()
+        const gatewayDeploy = solInfo.data
+        // Use bridgeOsTokens (keeper-controlled) — check via rh-gateway or sol-gateway
+        const deployRes = await fetch(`${API_BASE}/sol-gateway/info`)
+        const deployJson = await deployRes.json()
+
+        // Fetch bridge token mints from backend
+        const bridgeMintAddr = gatewayDeploy?.osTokens?.[ticker]
+        if (!bridgeMintAddr) throw new Error(`No Solana token for ${ticker}`)
+
+        const conn = new Connection('https://api.devnet.solana.com', { commitment: 'confirmed', confirmTransactionInitialTimeout: 30000 })
+        const mint = new PublicKey(bridgeMintAddr)
+        const userAta = await getAssociatedTokenAddress(mint, solPubkey!)
+        const burnAmount = BigInt(Math.round(numAmount * 1e6)) // 6 decimals
+
+        // Build burn transaction
+        const tx = new Transaction().add(
+          createBurnInstruction(userAta, mint, solPubkey!, burnAmount)
+        )
+        tx.feePayer = solPubkey!
+        tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash
+
+        setSwapStep('2/3')
+        setTxStatus('Sign burn in Phantom...')
+        const { signAndSendTransaction } = await import('./PhantomProvider').then(m => ({ signAndSendTransaction: null }))
+
+        // Use Phantom provider directly
+        const phantomProvider = (window as any).phantom?.solana ?? (window as any).solana
+        if (!phantomProvider) throw new Error('Phantom not found')
+
+        const signed = await phantomProvider.signAndSendTransaction(tx)
+        const solSig = signed.signature as string
+        setSolTxHash(solSig)
+        setTxStatus('Burn confirmed on Solana!')
+
+        // Step 3: Call bridge/complete to mint on dest chain
+        setSwapStep('3/3')
+        setTxStatus('Minting on ' + swapDest + '...')
+
+        // Create bridge record and complete
+        const initRes = await fetch(`${API_BASE}/bridge/initiate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ticker, amount: numAmount,
+            srcChain: 'solana', destChain: swapDest,
+            destAddress: swapDestAddr, walletAddress: solPubkey!.toBase58(),
+          }),
+        })
+        const initJson = await initRes.json()
+        if (!initJson.ok) throw new Error(initJson.error)
+
+        const completeRes = await fetch(`${API_BASE}/bridge/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bridgeId: initJson.data.bridgeId, burnTxHash: solSig }),
+        })
+        const completeJson = await completeRes.json()
+
+        if (completeJson.ok) {
+          const mintTx = completeJson.data?.mintTxHash ?? ''
+          if (swapDest === 'solana' && mintTx.length > 20) setSolTxHash(mintTx)
+          else if (mintTx.length > 20) setTxHash(mintTx)
+          setTxStatus(`Cross-chain swap complete! Token delivered to ${swapDest}.`)
+        } else {
+          setTxStatus('Swap sent. Delivery pending.')
+        }
+        setSwapStep(null)
+        fetchBalances()
+        setLoading(false)
+        return
+      }
+
+      // EVM source (Arbitrum/Robinhood): existing logic
       setSwapStep('1/4')
       setTxStatus('Preparing cross-chain swap...')
       const res = await fetch(`${API_BASE}/bridge/initiate`, {
@@ -344,31 +463,28 @@ export default function GatewayPanel() {
       const data = json.data
 
       if (data.burnTx) {
-        // Step 2: Approve (skip if null — Robinhood native transfer doesn't need approve)
         if (data.approveTx) {
           setSwapStep('2/4')
           setTxStatus('Step 2/4: Approve token spend...')
-          const h1 = await walletClient.sendTransaction({
+          const h1 = await walletClient!.sendTransaction({
             to: data.approveTx.to as `0x${string}`,
             data: data.approveTx.data as `0x${string}`,
-            chain: chain as any, account: address,
+            chain: chain as any, account: address!, ...getGasParams(),
           })
           setTxStatus('Step 2/4: Waiting for approval confirmation...')
           await waitForTx(h1, swapSrc)
         }
 
-        // Step 3: Burn/Transfer on source chain
         setSwapStep('3/4')
         setTxStatus('Step 3/4: Selling token on ' + swapSrc + '...')
-        const h2 = await walletClient.sendTransaction({
+        const h2 = await walletClient!.sendTransaction({
           to: data.burnTx.to as `0x${string}`,
           data: data.burnTx.data as `0x${string}`,
-          chain: chain as any, account: address,
+          chain: chain as any, account: address!, ...getGasParams(),
         })
         setTxHash(h2)
         setTxStatus('Step 3/4: Waiting for confirmation on ' + swapSrc + '...')
 
-        // Wait for source chain tx to confirm before minting on dest
         const burnSuccess = await waitForTx(h2, swapSrc)
         if (!burnSuccess) throw new Error('Source chain transaction failed. No tokens were swapped.')
 
@@ -471,22 +587,22 @@ export default function GatewayPanel() {
         }}>
           <div>
             <div style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>
-              Price ({activeEvmChain === 'robinhood' ? 'Robinhood' : 'Arbitrum'})
+              Price ({activeChain === 'solana' ? 'Solana' : activeChain === 'robinhood' ? 'Robinhood' : 'Arbitrum'})
             </div>
             <div style={{ fontSize: 20, fontWeight: 800, color: '#0F172A' }}>
-              ${(currentAsset.prices?.[activeEvmChain]?.price ?? currentAsset.oraclePrice).toFixed(2)}
+              ${(currentAsset.prices?.[activeChain]?.price ?? currentAsset.oraclePrice).toFixed(2)}
             </div>
             <div style={{ fontSize: 10, color: '#94A3B8' }}>
-              {currentAsset.prices?.[activeEvmChain]?.source ?? ''}
+              {currentAsset.prices?.[activeChain]?.source ?? ''}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>Network</div>
             <div style={{
               fontSize: 12, fontWeight: 700,
-              color: activeEvmChain === 'robinhood' ? '#00C805' : '#28A0F0',
+              color: activeChain === 'solana' ? '#9945FF' : activeChain === 'robinhood' ? '#00C805' : '#28A0F0',
             }}>
-              {activeEvmChain === 'robinhood' ? 'Robinhood' : 'Arbitrum'}
+              {activeChain === 'solana' ? 'Solana' : activeChain === 'robinhood' ? 'Robinhood' : 'Arbitrum'}
             </div>
           </div>
         </div>
@@ -576,10 +692,18 @@ export default function GatewayPanel() {
           <label style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
             {mode === 'buy' ? 'USDC Amount' : mode === 'sell' ? `${ticker} Amount` : `${ticker} to Swap`}
           </label>
-          {isConnected && (() => {
+          {/* Solana balance via backend — independent of PhantomProvider state */}
+          {mode !== 'buy' && solBalance[ticker] > 0 && (
+            <div style={{ fontSize: 11, color: '#9945FF', marginBottom: 2 }}>
+              Solana: <span style={{ fontWeight: 700 }}>{solBalance[ticker].toFixed(6)} {ticker}</span>
+            </div>
+          )}
+          {(isConnected || solConnected) && (() => {
             // Show balance from the correct chain
             const isSwap = mode === 'swap'
-            const balChain = isSwap ? swapSrc : activeEvmChain
+            // If only Phantom connected (no EVM), show Solana balances
+            const balChain = isSwap ? swapSrc
+              : (isConnected ? activeEvmChain : (solConnected ? 'solana' : activeEvmChain))
 
             if (mode === 'buy') {
               // Buy mode: show USDC (or MockUSDC) balance for active chain
@@ -605,8 +729,9 @@ export default function GatewayPanel() {
             // On Arbitrum: show osToken (arbBalance, 6 dec)
             const nativeBal = rhBalance[ticker] ?? 0
             const osBal = arbBalance[ticker] ?? 0
+            const solBal = solBalance[ticker] ?? 0
             const tokenBal = balChain === 'robinhood' ? nativeBal
-              : balChain === 'solana' ? (solBalance[ticker] ?? 0)
+              : balChain === 'solana' ? solBal
               : osBal
             const chainLabel = ` (${balChain})`
 
@@ -775,15 +900,13 @@ export default function GatewayPanel() {
         }}
       >
         {(() => {
-          // Check correct wallet based on mode and source chain
-          const needsSol = mode === 'swap' && swapSrc === 'solana'
-          const needsEvm = !needsSol
-          const walletReady = needsEvm ? isConnected : needsSol ? solConnected : isConnected
+          const needsSol = (mode === 'swap' && swapSrc === 'solana') || (!isConnected && solConnected)
+          const walletReady = isConnected || solConnected
 
-          if (!walletReady) return needsSol ? 'Connect Phantom' : 'Connect Wallet'
+          if (!walletReady) return 'Connect Wallet'
           if (loading) return 'Processing...'
           if (mode === 'buy') return `Buy ${ticker}`
-          if (mode === 'sell') return `Sell ${ticker}`
+          if (mode === 'sell') return `Sell ${ticker}${!isConnected && solConnected ? ' (Solana)' : ''}`
           return `Swap ${ticker}: ${swapSrc} → ${swapDest}`
         })()}
       </button>

@@ -241,15 +241,26 @@ bridgeRouter.post('/initiate', async (req, res) => {
         },
       })
     } else if (srcChain === 'solana') {
-      // Solana → Arbitrum: user burns on Solana (frontend builds Anchor tx)
-      // After burn confirms, call /bridge/complete to mint on Arbitrum
+      // Solana → EVM: frontend burns SPL token via Phantom, then calls /bridge/complete
+      const usdcValue = amount * (srcPrice ?? 0)
+      const fee = usdcValue * 0.0005
+      const netUsdc = usdcValue - fee
+      const destTokens = destPrice ? (netUsdc / destPrice) : 0
+
       res.json({
         ok: true,
         data: {
           bridgeId: record.id,
           srcChain, destChain, ticker: tickerUp, amount,
-          instruction: 'Sign burn transaction in Phantom wallet. After confirmation, bridge will auto-complete.',
-          solanaProgram: '76R7gyAYTFTnKPW3ePx44KTm1AQgRRqQopxTpGxpSy6G',
+          mode: 'solana-burn',
+          pricing: {
+            srcPrice, destPrice,
+            srcValue: Number(usdcValue.toFixed(2)),
+            fee: Number(fee.toFixed(2)),
+            feePct: '0.05%',
+            destTokens: Number(destTokens.toFixed(6)),
+          },
+          explorer: 'https://explorer.solana.com',
         },
       })
     } else {
